@@ -34,15 +34,15 @@ end
 
 function state_dynamics(state, action; dt=1.0)
     ω = rand(MvNormal([0; 0], 0.0001))
-    # [
-    #     state[1:2] + dt.*state[3:4] + .5*dt^2*action
-    #     state[3:4] + dt.*action + ω
-    # ], 0.0
-    v = (action + ω)
     [
-        state[1:2] + dt.*v
-        v
+        state[1:2] + dt.*state[3:4] + .5*dt^2*action
+        state[3:4] + dt.*action + ω
     ], 0.0
+    # v = (action + ω)
+    # [
+    #     state[1:2] + dt.*v
+    #     v
+    # ], 0.0
 end
 
 function prior(;loc, σ=1.0)
@@ -122,8 +122,8 @@ function test_localization_game()
     prior_location = [0.0; -0.5]
 
     prior_noise = 1.0
-    T = 5
-    D = 5
+    T = 8
+    D = 8
 
 
     game = SensingGames.SensingGame(
@@ -146,12 +146,12 @@ function test_localization_game()
     for i in 1:2000
         push!(costs, gradient_step!(policy, game))
         n = min(length(costs), 100)
-        if i % 1 == 0
-            hists = mapreduce(vcat, 1:1) do i
-                tree_rollout(game, policy)
+        println("$(i)\t$(sum(costs[end-n+1:end])/n)")
+        if i % 10 == 0
+            hists = mapreduce(vcat, 1:10) do i
+                [rollout(game, policy)]
             end
             render_localization_game(hists)
-            println("Average cost: $(sum(costs[end-n+1:end])/n)")
             # println("Rendered cost: $(cost(hist; targ=target_location))")
         end
     end

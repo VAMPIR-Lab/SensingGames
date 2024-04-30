@@ -81,8 +81,8 @@ function (policy::LinearPolicy)(obs)
     0.01*act, 0.0
 end
 
-function gradient_step!(policy::LinearPolicy, game::SensingGame; n=3)
-    loss_fn = pol -> tree_evaluate(game, pol; n)
+function gradient_step!(policy::LinearPolicy, game::SensingGame; n=10)
+    loss_fn = pol -> evaluate(game, pol; n)
     loss, grads = Flux.withgradient(loss_fn, policy) 
 
     for (i, m) in enumerate(policy.models)

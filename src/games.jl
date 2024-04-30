@@ -135,6 +135,7 @@ function tree_evaluate(game::SensingGame, pol::Policy; n=1, k=0.05)
     hists = mapreduce(vcat, 1:n) do _
         tree_rollout(game, pol)
     end
+    n = length(hists)
     probs = map(h -> exp(h.log_lik), hists)
     norm_probs = probs ./ sum(probs)
 
@@ -142,7 +143,7 @@ function tree_evaluate(game::SensingGame, pol::Policy; n=1, k=0.05)
         # (game.cost(h) + act_reg(h.acts)) #* p
         # -k*log(p) + act_reg(h.acts) + game.cost(h)
         game.cost(h)
-    end
+    end / n
 end
 
 
