@@ -20,19 +20,13 @@ function (policy::FluxPolicy)(obs)
     ob_in = selectdim(obs, ndims(obs), t)
     input = Float32.(ob_in)
     output = policy.model(input)
-    output, 1.0
+    output, 0.0
 end
 
-function gradient_step!(policy::FluxPolicy, game::SensingGame; n=100, γ=1)
-    function loss(pol)
-        costs = mapreduce(vcat, 1:n) do i
-            game.cost(rollout(game, pol))
-        end
-        μ = sum(costs) / n
-        μ + γ*sum((costs .- μ).^2)/(n-1)
-    end
+function gradient_step!(policy::FluxPolicy, game::SensingGame; n=1)
+    loss_fn = pol -> tree_evaluate(game, pol; n)
 
-    loss, grads = Flux.withgradient(loss, policy) 
+    loss, grads = Flux.withgradient(loss_fn, policy) 
     # println(grads)
     Flux.update!(policy.flux_setup, policy.model, grads[1].model)
     loss
@@ -50,7 +44,7 @@ struct RandomPolicy <: Policy
 end
 
 function (p::RandomPolicy)(obs::Matrix{Float64})
-    rand(p.action_space...), 1.0
+    rand(p.action_space...), 0.0
 end
 
 # ===================
@@ -63,7 +57,7 @@ struct LinearPolicy <: Policy
     flux_setups
 end
 
-function LinearPolicy(in, out, T; optimizer=Flux.Adam(0.05))
+function LinearPolicy(in, out, T; optimizer=Flux.Adam(0.5))
     models = [Dense(in => out) for t in 1:T]
     # models = [Dense(in*t => out) for t in 1:T]
     LinearPolicy(
@@ -84,17 +78,13 @@ function (policy::LinearPolicy)(obs)
     # model = policy.models[T]
     # input = Float32.(obs)
     # act = model([input...])
-    0.01*act, 1.0
+    0.01*act, 0.0
 end
 
-function gradient_step!(policy::LinearPolicy, game::SensingGame; n=1, γ=1)
-    function loss(pol)
-        mapreduce(+, 1:n) do i
-            game.cost(rollout(game, pol))
-        end / n
-    end
+function gradient_step!(policy::LinearPolicy, game::SensingGame; n=3)
+    loss_fn = pol -> tree_evaluate(game, pol; n)
+    loss, grads = Flux.withgradient(loss_fn, policy) 
 
-    loss, grads = Flux.withgradient(loss, policy) 
     for (i, m) in enumerate(policy.models)
         Flux.update!(policy.flux_setups[i], m, grads[1].models[i])
     end
@@ -114,7 +104,7 @@ struct EmbedPolicy <: Policy
     bottom
 end
 
-function EmbedPolicy(in, k, T, layers; optimizer=Flux.Adam(0.001))
+function EmbedPolicy(in, k, T, layers)
     EmbedPolicy(
         LinearPolicy(in, k, T),
         FluxPolicy(layers)
@@ -127,16 +117,10 @@ function (policy::EmbedPolicy)(obs)
     policy.bottom(e)
 end
 
-function gradient_step!(policy::EmbedPolicy, game::SensingGame; n=50, γ=1)
-    function loss(pol)
-        costs = mapreduce(vcat, 1:n) do i
-            game.cost(rollout(game, pol))
-        end
-        μ = sum(costs) / n
-        μ + γ*sum((costs .- μ).^2)/(n-1)
-    end
-
-    loss, grads = Flux.withgradient(loss, policy) 
+function gradient_step!(policy::EmbedPolicy, game::SensingGame; n=1)
+    loss_fn = pol -> tree_evaluate(game, pol; n)
+    loss, grads = Flux.withgradient(loss_fn, policy) 
+    # H = Flux.hessian(loss_fn, policy)
     
     # Update bottom
     Flux.update!(policy.bottom.flux_setup, policy.bottom.model, grads[1].bottom.model)
