@@ -1,114 +1,72 @@
-# using SensingGames
-using Distributions
-using Flux
 
-function dist2(a, b)
-    (a-b)'*(a-b)
+function make_sensing(agent::Symbol, targ; dt=1.0)
+    id_obs = Symbol("$(agent)_obs")
+    id_pos = Symbol("$(agent)_pos")
+
+    state = State(
+        id_obs => 2
+    )
+
+    function dyn!(state, game_params)
+        pos = state[id_pos]
+        σ2 = 4*(targ - pos[2])^2
+        x1, _ = sample_gauss(pos[1], σ2)
+        x2, _ = sample_gauss(pos[2], σ2)
+
+        alter(state,
+            id_obs => [x1; x2]
+        )
+    end
+    
+    state, dyn!
 end
 
-function sample_gauss(mean, var)
-    # Bowling approximation of inverse CDF
-    v = log(1/rand() - 1) * sqrt(var) / -1.702 + mean
-    ll = (-0.5*(v - mean)^2 / var) - log(sqrt(2 * pi * var))
-    return v,ll
-end
+function make_cost(agent::Symbol, targ)
+    id_pos = Symbol("$(agent)_pos")
 
-function sensor_dynamics(state; loc)
-    σ2 = 4*(loc - state[2])^2
-    # sample_gauss(state[1], σ2)[1]
-    x1, ll1 = sample_gauss(state[1], σ2)
-    x2, ll2 = sample_gauss(state[2], σ2)
-    [x1; x2], ll1 + ll2
-    # state[1:2], 0
-end
-
-# function sensor_dynamics(state; loc)
-#     dist = MvNormal(state[1:2], (loc - state[2])^2 + 0.1)
-#     # ob = state[1:2]
-#     ob = rand(dist)
-#     # ob = state[1:2] + randn(2)
-#     ll = logpdf(dist, ob)
-#     # ll = logpdf(dist, state[1:2])
-#     return ob, ll
-# end
-
-function state_dynamics(state, action; dt=1.0)
-    ω = rand(MvNormal([0; 0], 0.0001))
-    [
-        state[1:2] + dt.*state[3:4] + .5*dt^2*action
-        state[3:4] + dt.*action + ω
-    ], 0.0
-    # v = (action + ω)
-    # [
-    #     state[1:2] + dt.*v
-    #     v
-    # ], 0.0
-end
-
-function prior(;loc, σ=1.0)
-    dist = Normal(loc[1], σ)
-    x = rand(dist)
-    [x; loc[2]; zeros(2)], logpdf(dist, x)
-end
-
-function cost(hist; targ)
-    state = eachcol(hist.states)[end]
-    # -hist.log_lik
-    sqrt(dist2(state[1:2], targ))
+    function cost(state)
+        dist2(state[id_pos], targ)
+    end
 end
 
 
 function render_localization_game(hists)
-
     plt = plot(
         lims=(-3, 3)
     )
 
-    for hist in hists
-        state_hist = hist.states
-        ob_hist = hist.obs
+    for states in hists
 
-        state_x = [state[1] for state in eachcol(state_hist)]
-        state_y = [state[2] for state in eachcol(state_hist)]
+        state_x1 = [s[:p1_pos][1] for s in states]
+        state_y1 = [s[:p1_pos][2] for s in states]
+        state_x2 = [s[:p2_pos][1] for s in states]
+        state_y2 = [s[:p2_pos][2] for s in states]
 
-        ob_x = [ob[1] for ob in eachcol(ob_hist)]
-        ob_y = [ob[2] for ob in eachcol(ob_hist)]
-
-        plot!(state_x, state_y,
-            color=:black,
+        plot!(state_x1, state_y1,
+            color=:blue,
             alpha=0.3,
             label=""
         )
 
-        plot!(state_x, state_y,
+        plot!(state_x1, state_y1,
             seriestype=:scatter,
-            color=:black,
+            color=:blue,
             alpha=0.3,
             label=""
         )
 
-        # plot!(plt, ob_x, ob_y,
-        #     seriestype=:scatter,
-        #     markersize=3,
-        #     color=:steelblue,
-        # )
+        plot!(state_x2, state_y2,
+            color=:red,
+            alpha=0.3,
+            label=""
+        )
 
-        # plot!(plt, ob_x, ob_y,
-        #     alpha=0.3,
-        #     color=:steelblue
-        # )
-
-        # loc = [0; 0.0]
-        # dists = [sqrt(dist2(state[1:2], loc)) for state in eachcol(state_hist)]
-
-        # plot!(plt, ob_x, ob_y,
-        #     seriestype=:scatter,
-        #     markersize=dists
-        # )
-
-        # for (state, ob) in zip(state_hist, ob_hist)
-            
-        # end
+        plot!(state_x2, state_y2,
+            seriestype=:scatter,
+            color=:red,
+            alpha=0.3,
+            label=""
+        )
     end
 
     display(plt)
@@ -117,42 +75,58 @@ end
 
 function test_localization_game() 
 
-    sensor_location = 0.0
-    target_location = [0.0; -2.0]
-    prior_location = [0.0; -0.5]
+    state1, sdyn1 = make_vel_dynamics(:p1)
+    state2, sdyn2 = make_vel_dynamics(:p2)
 
-    prior_noise = 1.0
-    T = 8
-    D = 8
+    obs1, odyn1 = make_sensing(:p1, 0.0)
+    obs2, odyn2 = make_sensing(:p2, 0.0)
 
+    ctrl1 = make_horizon_control(:p1, :p1_obs, :p1_vel)
+    ctrl2 = make_horizon_control(:p2, :p2_obs, :p2_vel)
 
-    game = SensingGames.SensingGame(
-        () -> prior(;loc=prior_location, σ=prior_noise), 
-        state_dynamics,
-        x -> sensor_dynamics(x; loc=sensor_location),
-        x -> cost(x; targ=target_location),
-        zeros(2),
-        t_max=T,
-        max_obs_used=D
+    initial_state = merge(state1, state2, obs1, obs2)
+    initial_state = alter(initial_state,
+        :p1_pos => [randn(); -0.3],
+        :p2_pos => [randn(),  0.3]
     )
 
-    policy = SensingGames.LinearPolicy(2, 2, T)
+    game_params = (; 
+        policies = Dict([
+            :p1 => LinearPolicy(2, 2; t_max=8)
+            :p2 => LinearPolicy(2, 2; t_max=8)
+        ])
+    )
 
-    # policy = SensingGames.EmbedPolicy(2, 4, T, [
-    #     Flux.Dense(4 => 2),
-    # ])
+    prior = () -> alter(initial_state,
+        :p1_pos => [randn(); -0.3],
+        :p2_pos => [randn(),  0.3]
+    ) 
 
-    costs = []
-    for i in 1:2000
-        push!(costs, gradient_step!(policy, game))
-        n = min(length(costs), 100)
-        println("$(i)\t$(sum(costs[end-n+1:end])/n)")
-        if i % 10 == 0
-            hists = mapreduce(vcat, 1:10) do i
-                [rollout(game, policy)]
-            end
+    game = SensingGame(
+        [sdyn1, sdyn2, odyn1, odyn2, ctrl1, ctrl2],
+        prior
+    )
+
+    cost1 = make_cost(:p1, [0.0; -2.0])
+    cost2 = make_cost(:p2, [0.0; 2.0])
+
+    run_game = params -> rollout(game, params, T=5)
+    score1 = params -> mapreduce(_ -> cost1(run_game(params)[end]), +, 1:10)
+    score2 = params -> mapreduce(_ -> cost2(run_game(params)[end]), +, 1:10)
+
+    for t in 1:1000
+        println("t=$(t)")
+
+        if t % 10 == 0
+            hists = [run_game(game_params) for _ in 1:10]
             render_localization_game(hists)
-            # println("Rendered cost: $(cost(hist; targ=target_location))")
         end
+
+        grads1 = Flux.gradient(score1, game_params)[1]
+        grads2 = Flux.gradient(score2, game_params)[1]
+
+        apply_gradient!(game_params.policies[:p1], grads1.policies[:p1][])
+        apply_gradient!(game_params.policies[:p2], grads2.policies[:p2][])
     end
 end
+

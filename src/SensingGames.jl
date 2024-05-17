@@ -4,9 +4,10 @@
 
 module SensingGames
 
-## Differentiation
+## Differentiation + function approximation
 # using Symbolics, Symbolics.IfElse, SymbolicUtils
 # using PATHSolver
+using Zygote
 using Flux
 # using ForwardDiff
 
@@ -22,12 +23,15 @@ using SparseArrays
 using Infiltrator
 using Debugger
 
-
 abstract type Policy end
+abstract type AbstractState end
+abstract type Game end
 
-# include("particles.jl")
+include("utils.jl")
+include("statespaces.jl")
 include("games.jl")
 include("policies.jl")
+include("dynamics.jl")
 
 include("../examples/localization.jl")
 
