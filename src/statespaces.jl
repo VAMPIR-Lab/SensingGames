@@ -1,7 +1,6 @@
-
 struct State
-    z::AbstractVector{Float64}
-    ids::AbstractVector{Symbol}
+    z::Vector{Float32}
+    ids::Vector{Symbol}
     map::Dict{Symbol, UnitRange{Int}}
 end
 
@@ -9,7 +8,7 @@ function State(semantics::Pair{Symbol, Int}...)
 
     idx = 1
 
-    ids = [map(semantics) do (id, len)
+    ids = [map(semantics) do (id, _)
         id
     end...]
 
@@ -20,7 +19,6 @@ function State(semantics::Pair{Symbol, Int}...)
         u = (idx += lens[id])
         id => l:(u-1)
     end...)
-
 
     State(
         zeros(idx-1),
@@ -33,15 +31,15 @@ function Base.size(s::State)
     Base.size(s.z)
 end
 
-function Base.getindex(s::State, i::Int)
+function Base.getindex(s::State, i::Int)::Vector{Float32}
     s.z[i]
 end
 
-function Base.getindex(s::State, q::Symbol)
+function Base.getindex(s::State, q::Symbol)::Vector{Float32}
     s.z[s.map[q]]
 end
 
-function Base.getindex(s::State, I::Vararg{Int})
+function Base.getindex(s::State, I::Vararg{Int})::Vector{Float32}
     s.z[I...]
 end
 
@@ -49,11 +47,24 @@ function Base.length(s::State)
     length(s.z)
 end
 
-function alter(state::State, substitutions...)
+function alter(state::State, substitutions::Pair{Symbol, Vector{Float32}}...)::State
     dict = Dict(substitutions...)
-    z = mapreduce(vcat, state.ids) do id 
+    z::Vector{Float32} = mapreduce(vcat, state.ids) do id::Symbol
         if id in keys(dict)
-            dict[id]
+            Float32.(dict[id])
+        else
+            state[id]
+        end
+    end
+
+    State(z, state.ids, state.map)
+end
+
+function alter(state::State, substitutions::Pair{Symbol, Vector{Float64}}...)::State
+    dict = Dict(substitutions...)
+    z::Vector{Float32} = mapreduce(vcat, state.ids) do id::Symbol
+        if id in keys(dict)
+            Float32.(dict[id])
         else
             state[id]
         end

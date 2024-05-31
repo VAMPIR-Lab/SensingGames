@@ -1,25 +1,29 @@
 struct SensingGame <: Game
-    components
-    prior
+    components::Vector{Function}
+    history::Vector{State}
+    history_len
 end
 
-function step(state::State, g::SensingGame, game_params; dt=1)
-    for component in g.components
-        state = component(state, game_params)
-    end
-    state
+function SensingGame(components, initial_state::State; history_len=100)
+    SensingGame(components, [initial_state], history_len)
 end
 
-function rollout(g::SensingGame, game_params; dt=1, T=10)
-    state = nothing # scoping
-    Zygote.ignore() do
-        state = g.prior()
-        for (_, p) in game_params.policies
-            reset!(p)
+function step(g::SensingGame, game_params; n=1)
+    state::State = g.history[end]
+    res::Vector{State} = []
+
+    for t in 1:n
+        for component in g.components
+            h = [g.history[begin:end]; res]
+            state = component(state, h, game_params)
         end
+        res = [res; state]
     end
+    res
+end
 
-    map(1:T) do t
-        state = step(state, g, game_params; dt)
+function update!(g::SensingGame, states)
+    for s in states
+        roll!(g.history, s, g.history_len)
     end
 end
