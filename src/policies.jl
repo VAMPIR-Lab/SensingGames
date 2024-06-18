@@ -1,29 +1,21 @@
 
 
-struct LinearPolicy <: Policy
+struct FluxPolicy <: Policy
     models::Vector{Flux.Chain}
-    n_input::Int
     n_output::Int
     t_max::Int
     flux_setups::Vector
 end
 
-function LinearPolicy(n_input, n_output; optimizer=Flux.Adam(0.004), t_max=5)
-    models = [
-        Chain(
-            # Dense(n_input => n_output),
-            Dense(n_input => 64, relu),
-            Dense(64 => 64, relu),
-            Dense(64 => n_output)
-        ) for _ in 1:t_max
-    ]
-    LinearPolicy(
-        models, n_input, n_output, t_max,
-        [Flux.setup(optimizer, model) for model in models]
+function FluxPolicy(make_model, n_output; lr=0.004, t_max=5)
+    models = [make_model() for _ in 1:t_max]
+    FluxPolicy(
+        models, n_output, t_max,
+        [Flux.setup(Flux.Adam(lr), model) for model in models]
     )
 end
 
-function (policy::LinearPolicy)(history::Vector{Vector{Float32}})
+function (policy::FluxPolicy)(history::Vector{Vector{Float32}})
     result::Vector{Float32} = zeros(policy.n_output)
     hist = last(history, policy.t_max)
 
@@ -38,11 +30,12 @@ function (policy::LinearPolicy)(history::Vector{Vector{Float32}})
     tanh.(result)
 end
 
-function apply_gradient!(policy::LinearPolicy, grads)
+function apply_gradient!(policy::FluxPolicy, grads)
     for (i, m) in enumerate(policy.models)
         Flux.update!(policy.flux_setups[i], m, grads.models[i])
     end
 end
+
 
 struct RandomPolicy <: Policy
     n_output
@@ -51,6 +44,7 @@ end
 function (policy::RandomPolicy)(history)
     0.2 * tanh.(randn(policy.n_output))
 end
+
 
 struct BoundedRandomPolicy <: Policy
     n_output
@@ -78,8 +72,6 @@ function _act(policy::Policy, obs_history::Vector{Vector{Float32}})::Vector{Floa
     policy(obs_history)
 end
 
-
-
 function make_horizon_control(agent::Symbol, id_obs::Symbol, id_action::Symbol)
     function dyn!(state::State, history::Vector{State}, game_params)::State
         current_obs::Vector{Vector{Float32}} = [state[id_obs]]
@@ -94,17 +86,3 @@ function make_horizon_control(agent::Symbol, id_obs::Symbol, id_action::Symbol)
     # no point to returning state components here; there are none
 end
 
-function make_score(cost_fn, particles; 
-    n_samples=1, n_lookahead=2, parallel=false, mode=:sum)
-    sum_fn = parallel ? ThreadsX.sum : Base.sum
-    function score(θ)
-        sum_fn(particles) do prt
-            Base.sum(1:n_samples) do _
-                states = step(prt, θ, n=n_lookahead)
-                Base.sum(states) do s
-                    cost_fn(s)
-                end / length(states)
-            end / n_samples
-        end / length(particles)
-    end
-end

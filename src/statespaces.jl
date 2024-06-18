@@ -1,3 +1,12 @@
+# The State struct is a convenience to allow indexing vectors by symbols.
+#   Managing big state spaces gets annoying so it's convenient to 
+#   be able to say, e.g., state[:p1_pos] and know that it's player 1's position,
+#   knowing that `state` is basically a 1D vector but not caring about where
+#   its components actually live.
+# They're also helpful because Zygote doesn't permit array mutation:
+#   States are "immutable" (you actually can mutate them, but you shouldn't);
+#   you can use `alter` to get a new State from an old one and a list of substitutions.
+
 struct State
     z::Vector{Float32}
     ids::Vector{Symbol}

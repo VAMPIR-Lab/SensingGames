@@ -1,6 +1,11 @@
+# This defines a derivative rule through ThreadsX.sum, which lets us
+#   take a gradient through multiple threads
+#   See https://discourse.julialang.org/t/parallel-reductions-with-zygote/75969/9
+
 using ThreadsX
 using ChainRules
 using ChainRules: RuleConfig, HasReverseMode, rrule_via_ad, ProjectTo, NoTangent, unthunk
+
 function ChainRules.rrule(
     config::RuleConfig{>:HasReverseMode}, ::typeof(ThreadsX.sum), f, xs::AbstractArray)
     fx_and_pullbacks = ThreadsX.map(x->rrule_via_ad(config, f, x), xs)
