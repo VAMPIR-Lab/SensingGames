@@ -99,13 +99,15 @@ end
 
 struct StateDist
     z::Matrix{Float32}
+    w::Vector{Float32}
     ids::Vector{Symbol}
     map::Dict{Symbol, UnitRange{Int}}
 end
 
-function repeat(state::State, n::Int64)
+function StateDist(state::State, n::Int64)
     StateDist(
         Base.repeat(state.z', n),
+        log.(1/n * ones(n)),
         state.ids,
         state.map
     )
@@ -115,8 +117,8 @@ function Base.size(s::StateDist)
     size(s.z)
 end
 
-function Base.getindex(s::StateDist, I::Vararg{Union{Int, Colon}})::Matrix{Float32}
-    s.z[I...]
+function Base.getindex(s::StateDist, i::Union{Int, Colon, UnitRange{Int}})
+    State(s.z[i, :], s.ids, s.map)
 end
 
 function Base.getindex(s::StateDist, q::Symbol)::Matrix{Float32}
@@ -127,20 +129,13 @@ function Base.length(s::StateDist)
     size(s.z)[1]
 end
 
-function alter(state::StateDist, substitutions::Pair{Symbol, Matrix{Float32}}...)::StateDist
-    dict = Dict(substitutions...)
-    z::Matrix{Float32} = mapreduce(hcat, state.ids) do id::Symbol
-        if id in keys(dict)
-            dict[id]
-        else
-            state[id]
-        end
+function expectation(f, s::StateDist)
+    sum(1:length(s)) do i
+        f(s[i]) * exp(s.w[i])
     end
-
-    StateDist(z, state.ids, state.map)
 end
 
-function alter(state::StateDist, substitutions::Pair{Symbol, Matrix{Float64}}...)::StateDist
+function alter(state::StateDist, substitutions...)::StateDist
     dict = Dict(substitutions...)
     z::Matrix{Float32} = mapreduce(hcat, state.ids) do id::Symbol
         if id in keys(dict)
@@ -150,7 +145,18 @@ function alter(state::StateDist, substitutions::Pair{Symbol, Matrix{Float64}}...
         end
     end
 
-    StateDist(z, state.ids, state.map)
+    StateDist(z, state.w, state.ids, state.map)
+end
+
+function reweight(state::StateDist, w)
+    w_new = state.w .+ vec(w)
+    w_new = w_new .- log(sum(exp.(w_new)))
+    StateDist(state.z, w_new, state.ids, state.map)
+end
+
+function draw(state::StateDist)
+    i = wsample(1:length(state), exp.(state.w))
+    State(state.z[i, :], state.ids, state.map)
 end
 
 Zygote.@adjoint State(semantics...) = State(semantics...), p -> (nothing)

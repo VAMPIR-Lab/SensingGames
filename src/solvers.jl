@@ -28,8 +28,8 @@ function solve_unrelated_particles(callback, game::SensingGame, initial_params, 
 
     for t in 1:options.n_iters
         try
-            c1, g1 = Flux.withgradient(θ -> score(θ, 1, (t>1)), game_params)
-            c1, g2 = Flux.withgradient(θ -> score(θ, 2, (t>1)), game_params)
+            c1, g1 = Flux.withgradient(θ -> score(θ, 1, false), game_params)
+            c1, g2 = Flux.withgradient(θ -> score(θ, 2, false), game_params)
             apply_gradient!(game_params.policies[:p1], g1[1].policies[:p1])
             apply_gradient!(game_params.policies[:p2], g2[1].policies[:p2])
         catch e
@@ -37,8 +37,9 @@ function solve_unrelated_particles(callback, game::SensingGame, initial_params, 
                 @warn "Interrupted"
                 return
             else
-                @warn "Gradient failed with $e; attempting to continue..."
-                continue
+                throw(e)
+                # @warn "Gradient failed with $e; attempting to continue..."
+                # continue
             end
         end
 
@@ -46,6 +47,8 @@ function solve_unrelated_particles(callback, game::SensingGame, initial_params, 
             for prt in particles
                 step!(prt, game_params)
             end
+        else
+            restart!.(particles)
         end
 
         callback((t, particles, game_params))

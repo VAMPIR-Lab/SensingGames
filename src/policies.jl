@@ -15,18 +15,21 @@ function FluxPolicy(make_model, n_output; lr=0.004, t_max=5)
     )
 end
 
-function (policy::FluxPolicy)(history::Vector{Vector{Float32}})
-    result::Vector{Float32} = zeros(policy.n_output)
+function (policy::FluxPolicy)(history)
     hist = last(history, policy.t_max)
 
-    for (t, obs) in enumerate(reverse(hist))
+    result = sum(enumerate(reverse(hist))) do (t, obs)
+
+        # The last index for Flux models is assumed to be batch
+        # In StateDists the first index is the batch
+        # (because Julia is column major and we 
+        # tend to pull state components more frequently
+        # than we pull state particles)
+
         m::Flux.Chain = policy.models[t]
-        output::Vector{Float32} = m(obs)
-        result += 0.01 * output
+        0.01 * m(obs')
     end
 
-    # p = sig(result[1])
-    # softif(rand() - p, tanh.(result[2:3]), tanh.(result[4:5]))
     tanh.(result)
 end
 
@@ -67,18 +70,18 @@ function (policy::ZeroPolicy)(history)
 end
 
 
-function _act(policy::Policy, obs_history::Vector{Vector{Float32}})::Vector{Float32}
+function _act(policy::Policy, obs_history)
     # type barrier for optimization
     policy(obs_history)
 end
 
 function make_horizon_control(agent::Symbol, id_obs::Symbol, id_action::Symbol)
-    function dyn!(state::State, history::Vector{State}, game_params)::State
-        current_obs::Vector{Vector{Float32}} = [state[id_obs]]
-        past_obs::Vector{Vector{Float32}} = map(s -> s[id_obs], history)
-        obs_history::Vector{Vector{Float32}} = [past_obs; current_obs] 
+    function dyn!(state::StateDist, history::Vector{StateDist}, game_params)::StateDist
+        current_obs = [state[id_obs]]
+        past_obs = map(s -> s[id_obs], history)
+        obs_history = [past_obs; current_obs] 
 
-        action::Vector{Float32} = _act(game_params.policies[agent], obs_history)
+        action = _act(game_params.policies[agent], obs_history)'
         alter(state, 
             id_action => action
         )

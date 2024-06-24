@@ -4,15 +4,32 @@ function render_traj(hist, agent)
     color = (; p1=:blue, p2=:red, p3=:green)[agent]
     id_pos = Symbol("$(agent)_pos")
 
-    state_x = [s[id_pos][1] for s in hist]
-    state_y = [s[id_pos][2] for s in hist]
+    state_x = mapreduce(vcat, hist) do dist # in other words, hist is a dist list
+        map(1:length(dist)) do i
+            dist[i][id_pos][1]
+        end
+    end
 
-    plot!(state_x, state_y,
-            color=color, alpha=0.1, label="")
+    state_y = mapreduce(vcat, hist) do dist
+        map(1:length(dist)) do i
+            dist[i][id_pos][2]
+        end
+    end
+
+    state_alpha = mapreduce(vcat, hist) do dist
+        map(1:length(dist)) do i
+            q = exp(dist.w[i])
+            0.2 + (q * 0.8) # see every particle at least a little
+        end
+    end
+
+
+    # plot!(state_x, state_y,
+    #         color=color, alpha=0.1, label="")
 
     plot!(state_x, state_y,
             seriestype=:scatter,
-            color=color, alpha=0.8, label="")
+            color=color, alpha=state_alpha, label="")
 end
 
 # Renders :p<agent>_obs (agent's observation) as a scatter plot
@@ -22,8 +39,21 @@ function render_obs(hist, agent; range=1:2)
     color = (; p1=:purple, p2=:orange, p3=:yellow)[agent]
     id_obs = Symbol("$(agent)_obs")
 
-    obs_x = [s[id_obs][range][1] for s in hist]
-    obs_y = [s[id_obs][range][2] for s in hist]
+    # Initial observation is zeros
+    # This is never used by the policy but it's annoying when rendering
+    hist = hist[2:end]
+
+    obs_x = mapreduce(vcat, hist) do dist
+        map(1:length(dist)) do i
+            dist[i][id_obs][1]
+        end
+    end
+
+    obs_y = mapreduce(vcat, hist) do dist
+        map(1:length(dist)) do i
+            dist[i][id_obs][2]
+        end
+    end
 
     plot!(obs_x, obs_y,
             seriestype=:scatter,

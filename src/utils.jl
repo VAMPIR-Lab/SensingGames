@@ -30,6 +30,9 @@ function sample_trunc_gauss(mean, var, a, b)
     return v
 end
 
+function gauss_ll(x, mean, var)
+    -0.5 * (x-mean)^2 / var - log(2π * var)/2
+end
 
 # Very basic geometry stuff
 function dist2(a, b)
@@ -92,4 +95,23 @@ end
 
 function cost_regularize(v; α=0.1)
     α * sum(v.^2)
+end
+
+
+# Differentiable sampling
+function dsample(v, n)
+    v[_rand_idxs(length(v), n)]
+end
+
+function _rand_idxs(l, n)
+    Zygote.ignore() do 
+        Random.shuffle(1:l)[1:n]
+    end
+end
+
+function wsample(items, weights) 
+    id = Zygote.ignore() do 
+        findfirst(cumsum(weights) .> rand())
+    end
+    items[id]
 end

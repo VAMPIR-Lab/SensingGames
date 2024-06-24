@@ -3,7 +3,7 @@ struct SensingGame <: Game
     dyn_fns::Vector{Function}
     cost_fn::Function
 
-    history::Vector{State}
+    history::Vector{StateDist}
     history_len::Int
 end
 
@@ -23,8 +23,10 @@ function update!(g::SensingGame, states)
 end
 
 function step(g::SensingGame, game_params; n=1)
+    @bp
+
     state = isempty(g.history) ? g.prior_fn() : g.history[end]
-    res::Vector{State} = [state]
+    res::Vector{StateDist} = [state]
 
     for t in 1:n
         for dyn_fn in g.dyn_fns

@@ -13,7 +13,7 @@ function make_vel_dynamics(agent::Symbol; dt=1.0, dims=2, control_scale=1.0)
         id_vel => dims
     )
 
-    function dyn!(state::State, history::Vector{State}, game_params)
+    function dyn!(state::StateDist, history, game_params)
         pos = state[id_pos] + dt*state[id_vel]*control_scale
         alter(state,
             id_pos => pos
@@ -35,7 +35,7 @@ function make_acc_dynamics(agent::Symbol; dt=1.0, dims=2, drag=0.4, control_scal
         id_acc => dims
     )
 
-    function dyn!(state::State, history::Vector{State}, game_params)
+    function dyn!(state::StateDist, history, game_params)
         acc = dt*state[id_acc] * control_scale
         vel = dt*state[id_vel]*(1-drag) + acc + 0.1*randn(2)
         pos = state[id_pos] + vel + 0.5*acc.^2
@@ -61,7 +61,7 @@ function make_unicycle_dynamics(agent::Symbol; dt=1.0)
         id_u => 2
     )
 
-    function dyn!(state::State, history::Vector{State}, game_params)
+    function dyn!(state::StateDist, history, game_params)
         v = 0.1 
         # θ = game_params.dθ
         # dθ = 0
@@ -94,7 +94,7 @@ end
 #   set slightly outside of the actual constraint
 function make_bound_dynamics(id, lower, upper; ω=1.0)
 
-    function dyn!(state::State, history, gp)
+    function dyn!(state::StateDist, history, gp)
         alter(state,
             id => Float32.(softclamp.(state[id], lower + ω*rand(), upper + ω*rand()))
         )

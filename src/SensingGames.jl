@@ -23,6 +23,9 @@ using SparseArrays
 using ThreadsX
 using StaticArrays
 
+# Stats
+using StatsBase
+
 ## Development tools
 using Infiltrator
 using Debugger

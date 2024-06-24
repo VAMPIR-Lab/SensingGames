@@ -88,7 +88,7 @@ function test_fovtag()
     fovtag_game = SensingGame(prior_fn, dyn_fns, cost_fn)
     options = (;
         parallel = true,
-        n_particles = 5,
+        n_particles = 1,
         n_lookahead = 8,
         n_render = 1,
         n_iters = 400,
