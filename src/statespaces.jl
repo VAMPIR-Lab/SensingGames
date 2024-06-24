@@ -96,5 +96,63 @@ function merge(states::State...)
     State(z, ids, map)
 end
 
+
+struct StateDist
+    z::Matrix{Float32}
+    ids::Vector{Symbol}
+    map::Dict{Symbol, UnitRange{Int}}
+end
+
+function repeat(state::State, n::Int64)
+    StateDist(
+        Base.repeat(state.z', n),
+        state.ids,
+        state.map
+    )
+end
+
+function Base.size(s::StateDist)
+    size(s.z)
+end
+
+function Base.getindex(s::StateDist, I::Vararg{Union{Int, Colon}})::Matrix{Float32}
+    s.z[I...]
+end
+
+function Base.getindex(s::StateDist, q::Symbol)::Matrix{Float32}
+    s.z[:, s.map[q]]
+end
+
+function Base.length(s::StateDist)
+    size(s.z)[1]
+end
+
+function alter(state::StateDist, substitutions::Pair{Symbol, Matrix{Float32}}...)::StateDist
+    dict = Dict(substitutions...)
+    z::Matrix{Float32} = mapreduce(hcat, state.ids) do id::Symbol
+        if id in keys(dict)
+            dict[id]
+        else
+            state[id]
+        end
+    end
+
+    StateDist(z, state.ids, state.map)
+end
+
+function alter(state::StateDist, substitutions::Pair{Symbol, Matrix{Float64}}...)::StateDist
+    dict = Dict(substitutions...)
+    z::Matrix{Float32} = mapreduce(hcat, state.ids) do id::Symbol
+        if id in keys(dict)
+            Float32.(dict[id])
+        else
+            state[id]
+        end
+    end
+
+    StateDist(z, state.ids, state.map)
+end
+
 Zygote.@adjoint State(semantics...) = State(semantics...), p -> (nothing)
 Zygote.@adjoint State(z::AbstractVector, ids, map) = State(z, ids, map), p -> (p.z, nothing, nothing)
+Zygote.@adjoint StateDist(z::Matrix{Float32}, ids, map) = StateDist(z, ids, map), p -> (p.z, nothing, nothing)

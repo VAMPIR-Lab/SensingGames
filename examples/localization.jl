@@ -4,19 +4,41 @@
 #   In a method that is properly using observations we expect
 #   the agent to move towards y=0, then move towards the target.
 
-function make_localization_sensing(agent::Symbol, targ; dt=1.0)
-    id_obs = Symbol("$(agent)_obs")
-    id_pos = Symbol("$(agent)_pos")
+function make_localization_sensing(targ_1, targ_2; n=2, dt=1.0)
 
     state = State(
         id_obs => 2
     )
 
-    function dyn!(state, history, game_params)
-        pos = state[id_pos]
-        σ2 = 4*(targ - pos[2])^2
-        x1 = sample_gauss(pos[1], σ2)
-        x2 = sample_gauss(pos[2], σ2)
+    function dyn!(state::StateDist, history, game_params)
+        pos_1 = state[:p1_pos][idxs]
+        pos_2 = state[:p2_pos][idxs]
+
+        idxs = rand(1:length(state), n)
+
+        σ2_1 = 4*(targ_1 - pos_1[2])^2
+        σ2_2 = 4*(targ_2 - pos_2[2])^2
+
+        mapreduce(vcat, idxs) do i
+            map(idxs) do j
+                μ_1 = state[:p1_pos][i, :]
+                μ_2 = state[:p1_pos][j, :]
+                σ_1 = 4*(targ_1 - μ_1[2])
+                σ_2 = 4*(targ_2 - μ_2[2])
+
+                new_dist = alter(state,
+                    :p1_obs => sample_gauss.(μ_1, σ_1^2)
+                    :p2_obs => sample_gauss.(μ_2, σ_2^2)
+                )
+
+                new_ll1 = state[:p1_pos] 
+            end 
+        end
+
+        obs_1 = sample_gauss.(pos_1, σ2_1)
+        obs_2 = sample_gauss.(pos_2, σ2_2)
+
+
 
         alter(state,
             id_obs => [x1; x2]
@@ -35,8 +57,9 @@ function make_localization_cost(targs)
     end
 end
 
-function make_localization_prior(zero_state)
-    () -> alter(zero_state,
+function make_localization_prior(state)
+    () -> alter(state,
+        pos 
         :p1_pos => [randn();  0.3],
         :p2_pos => [randn(); -0.3]
     ) 
