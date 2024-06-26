@@ -19,7 +19,7 @@ function render_traj(hist, agent)
     state_alpha = mapreduce(vcat, hist) do dist
         map(1:length(dist)) do i
             q = exp(dist.w[i])
-            0.2 + (q * 0.8) # see every particle at least a little
+            # 0.2 + (q * 0.8) # see every particle at least a little
         end
     end
 

@@ -95,7 +95,7 @@ function test_blurtag()
         )
     )
 
-    solve_unrelated_particles(blurtag_game, initial_params, options) do (t, particles, params)
+    solve(blurtag_game, initial_params, options) do (t, particles, params)
         plt = plot(aspect_ratio=:equal, lims=(-30, 30))
         title!("Planar blurtag: t=$t")
         hists = [last(prt.history, options.n_lookahead) for prt in particles]

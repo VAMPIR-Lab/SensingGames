@@ -1,35 +1,31 @@
 # Partially observable stochastic game solution methods under research.
 
-# "Unrelated particles" maintains a bunch of particles which are all essentially
-#   unique instances of the game with unique histories. A single step consists of simulating
-#   all particles forward T steps, taking a gradient over the resulting cost, and (optionally)
-#   actually updating the particles forward a single step. (In some games we don't want to do this,
-#   instead sampling from the prior every time.)
-#
-# You can supply a callback (i.e. with a `do` block); it will receive (t, particles, params)
-#   on every step to be used for output display or rendering.   
-function solve_unrelated_particles(callback, game::SensingGame, initial_params, options)
+function solve(callback, game::SensingGame, initial_params, options)
     game_params = initial_params
+
+    # TODO This is misleading - particles are now under a single StateDist
     particles = [clone(game) for _ in 1:options.n_particles]
 
     function score(θ, ego, threaded)
         sum_fn = threaded ? ThreadsX.sum : Base.sum
         sum_fn(particles) do prt
-            states = step(prt, θ, n=options.n_lookahead)
-            if options.score_mode == :sum
-                Base.sum(states) do s
-                    game.cost_fn(s)[ego]
-                end / length(states)
-            else
-                game.cost_fn(states[end])[ego]
-            end
+            dist_hists = step(prt, θ, n=options.n_lookahead)
+            game.cost_fn(dist_hists)[ego]
         end / options.n_particles
     end
 
+    r = abs(rand(Int))
+
     for t in 1:options.n_iters
+        
+        # sleep(0.08)
+
         try
+            Random.seed!(r + t ÷ options.steps_per_seed)
             c1, g1 = Flux.withgradient(θ -> score(θ, 1, false), game_params)
-            c1, g2 = Flux.withgradient(θ -> score(θ, 2, false), game_params)
+            Random.seed!(r + t ÷ options.steps_per_seed)
+            c2, g2 = Flux.withgradient(θ -> score(θ, 2, false), game_params)
+            println("$(c1)\t$(c2)")
             apply_gradient!(game_params.policies[:p1], g1[1].policies[:p1])
             apply_gradient!(game_params.policies[:p2], g2[1].policies[:p2])
         catch e
@@ -51,6 +47,7 @@ function solve_unrelated_particles(callback, game::SensingGame, initial_params, 
             restart!.(particles)
         end
 
+        Random.seed!(r + t ÷ options.steps_per_seed)
         callback((t, particles, game_params))
     end
 end

@@ -113,6 +113,16 @@ function StateDist(state::State, n::Int64)
     )
 end
 
+function StateDist(states::AbstractArray{State})
+    zs = [s.z for s in states]
+    StateDist(
+        reduce(vcat, zs),
+        zeros(length(states)),
+        states[begin].ids,
+        states[begin].map
+    )
+end
+
 function Base.size(s::StateDist)
     size(s.z)
 end
@@ -150,13 +160,21 @@ end
 
 function reweight(state::StateDist, w)
     w_new = state.w .+ vec(w)
-    w_new = w_new .- log(sum(exp.(w_new)))
     StateDist(state.z, w_new, state.ids, state.map)
 end
 
-function draw(state::StateDist)
-    i = wsample(1:length(state), exp.(state.w))
-    State(state.z[i, :], state.ids, state.map)
+function draw(dist::StateDist; n=1)
+    Zygote.ignore() do
+        idxs = dsample(1:length(dist), n)
+        map(idxs) do i
+            State(dist.z[i, :], dist.ids, dist.map)
+        end
+    end
+
+    # Zygote.ignore() do
+    #     i = wsample(1:length(dist), exp.(dist.w))
+    #     State(dist.z[i, :], dist.ids, dist.map)
+    # end
 end
 
 Zygote.@adjoint State(semantics...) = State(semantics...), p -> (nothing)

@@ -109,7 +109,7 @@ function test_fovtag()
         )
     )
 
-    solve_unrelated_particles(fovtag_game, initial_params, options) do (t, particles, params)
+    solve(fovtag_game, initial_params, options) do (t, particles, params)
         plt = plot(aspect_ratio=:equal, lims=(-30, 30))
         title!("Planar fovtag: t=$t")
         hists = [last(prt.history, options.n_lookahead) for prt in particles]

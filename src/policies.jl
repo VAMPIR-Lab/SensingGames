@@ -18,6 +18,11 @@ end
 function (policy::FluxPolicy)(history)
     hist = last(history, policy.t_max)
 
+    # It's possible that (because of branching)
+    #   not every state distribution has the same
+    #   number of particles
+    h = size(history[end])[1]
+
     result = sum(enumerate(reverse(hist))) do (t, obs)
 
         # The last index for Flux models is assumed to be batch
@@ -27,7 +32,12 @@ function (policy::FluxPolicy)(history)
         # than we pull state particles)
 
         m::Flux.Chain = policy.models[t]
-        0.01 * m(obs')
+        r = 0.01 * m(obs')'
+        # @show h/size(r)[1]
+        # @show size(r)
+        mapreduce(vcat, 1:(h/size(r)[1])) do _
+            r
+        end
     end
 
     tanh.(result)
@@ -61,13 +71,13 @@ function (policy::BoundedRandomPolicy)(history)
 end
 
 
-struct ZeroPolicy <: Policy
-    n_output
-end
+# struct ZeroPolicy <: Policy
+#     n_output
+# end
 
-function (policy::ZeroPolicy)(history)
-    (zeros(policy.n_output))
-end
+# function (policy::ZeroPolicy)(history)
+#     (zeros(policy.n_output))
+# end
 
 
 function _act(policy::Policy, obs_history)
@@ -81,7 +91,7 @@ function make_horizon_control(agent::Symbol, id_obs::Symbol, id_action::Symbol)
         past_obs = map(s -> s[id_obs], history)
         obs_history = [past_obs; current_obs] 
 
-        action = _act(game_params.policies[agent], obs_history)'
+        action = _act(game_params.policies[agent], obs_history)
         alter(state, 
             id_action => action
         )

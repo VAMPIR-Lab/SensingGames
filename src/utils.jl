@@ -30,7 +30,7 @@ function sample_trunc_gauss(mean, var, a, b)
     return v
 end
 
-function gauss_ll(x, mean, var)
+function gauss_logpdf(x, mean, var)
     -0.5 * (x-mean)^2 / var - log(2π * var)/2
 end
 
@@ -109,9 +109,12 @@ function _rand_idxs(l, n)
     end
 end
 
-function wsample(items, weights) 
-    id = Zygote.ignore() do 
-        findfirst(cumsum(weights) .> rand())
+function wsample(items, weights)
+    weights = weights ./ sum(weights)
+    id = findfirst(cumsum(weights) .> rand())
+    if isnothing(id)
+        # This can happen if all the weights are very lower
+        return rand(items)
     end
     items[id]
 end
