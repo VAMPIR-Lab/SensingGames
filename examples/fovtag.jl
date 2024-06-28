@@ -62,7 +62,7 @@ function render_fovtag(hists)
         for agent in [:p1, :p2]
             render_traj(h, agent)
             render_obs(h, agent; range=3:4)
-            render_heading(h, agent)
+            # render_heading(h, agent)
         end
     end
 end

@@ -37,7 +37,7 @@ function make_acc_dynamics(agent::Symbol; dt=1.0, dims=2, drag=0.4, control_scal
 
     function dyn!(state::StateDist, history, game_params)
         acc = dt*state[id_acc] * control_scale
-        vel = dt*state[id_vel]*(1-drag) + acc + 0.1*randn(2)
+        vel = dt*state[id_vel]*(1-drag) .+ acc
         pos = state[id_pos] + vel + 0.5*acc.^2
 
         alter(state, 

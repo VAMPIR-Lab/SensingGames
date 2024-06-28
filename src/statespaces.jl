@@ -114,10 +114,10 @@ function StateDist(state::State, n::Int64)
 end
 
 function StateDist(states::AbstractArray{State})
-    zs = [s.z for s in states]
+    zs = [s.z' for s in states]
     StateDist(
         reduce(vcat, zs),
-        zeros(length(states)),
+        fill(-log(length(states)), length(states)),
         states[begin].ids,
         states[begin].map
     )
@@ -135,13 +135,23 @@ function Base.getindex(s::StateDist, q::Symbol)::Matrix{Float32}
     s.z[:, s.map[q]]
 end
 
+function Base.getindex(s::StateDist, syms::Vector{Symbol})
+    mapreduce(hcat, syms) do q
+        s[q]
+    end
+end
+
 function Base.length(s::StateDist)
     size(s.z)[1]
 end
 
 function expectation(f, s::StateDist)
     sum(1:length(s)) do i
-        f(s[i]) * exp(s.w[i])
+        c = f(s[i])
+        p = exp(s.w[i])
+        q = s[i][:p2_pos]
+        # println("Expectation: $p prob of cost $c from pos $q")
+        p * c
     end
 end
 
@@ -158,23 +168,39 @@ function alter(state::StateDist, substitutions...)::StateDist
     StateDist(z, state.w, state.ids, state.map)
 end
 
+
 function reweight(state::StateDist, w)
     w_new = state.w .+ vec(w)
     StateDist(state.z, w_new, state.ids, state.map)
 end
 
-function draw(dist::StateDist; n=1)
+function draw(dist::StateDist; n=1, as_dist=true)
     Zygote.ignore() do
+        # idxs = wdsample(1:length(dist), exp.(dist.w), n)
         idxs = dsample(1:length(dist), n)
-        map(idxs) do i
-            State(dist.z[i, :], dist.ids, dist.map)
+        if as_dist
+            StateDist(dist.z[idxs, :], dist.w[idxs], dist.ids, dist.map)
+        else
+            map(idxs) do i
+                State(dist.z[i, :], dist.ids, dist.map)
+            end
         end
     end
+end
 
-    # Zygote.ignore() do
-    #     i = wsample(1:length(dist), exp.(dist.w))
-    #     State(dist.z[i, :], dist.ids, dist.map)
-    # end
+# When state spaces get more particles 
+#   (as a result of e.g. cross dynamics)
+#   the history can have inconsistent numbers 
+#   of particles
+function debranch_history(hist)
+    h = size(hist[end])[1]
+
+    map(hist) do dist
+        n = h ÷ length(dist)
+        z_new = repeat(dist.z, n)
+        w_new = repeat(dist.w, n)
+        StateDist(z_new, w_new, dist.ids, dist.map)
+    end
 end
 
 Zygote.@adjoint State(semantics...) = State(semantics...), p -> (nothing)

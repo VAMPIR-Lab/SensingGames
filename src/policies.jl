@@ -11,7 +11,7 @@ function FluxPolicy(make_model, n_output; lr=0.004, t_max=5)
     models = [make_model() for _ in 1:t_max]
     FluxPolicy(
         models, n_output, t_max,
-        [Flux.setup(Flux.Adam(lr), model) for model in models]
+        [Flux.setup(Adam(lr), model) for model in models]
     )
 end
 
@@ -24,6 +24,7 @@ function (policy::FluxPolicy)(history)
     h = size(history[end])[1]
 
     result = sum(enumerate(reverse(hist))) do (t, obs)
+        
 
         # The last index for Flux models is assumed to be batch
         # In StateDists the first index is the batch
@@ -40,6 +41,7 @@ function (policy::FluxPolicy)(history)
         end
     end
 
+    # result ./ sqrt.(sum(result.^2, dims=2))
     tanh.(result)
 end
 
@@ -85,10 +87,11 @@ function _act(policy::Policy, obs_history)
     policy(obs_history)
 end
 
-function make_horizon_control(agent::Symbol, id_obs::Symbol, id_action::Symbol)
+function make_horizon_control(agent::Symbol, ids_obs::Union{Symbol, Vector{Symbol}}, id_action::Symbol)
     function dyn!(state::StateDist, history::Vector{StateDist}, game_params)::StateDist
-        current_obs = [state[id_obs]]
-        past_obs = map(s -> s[id_obs], history)
+        
+        current_obs = [state[ids_obs]]
+        past_obs = map(s -> s[ids_obs], history)
         obs_history = [past_obs; current_obs] 
 
         action = _act(game_params.policies[agent], obs_history)

@@ -1,36 +1,35 @@
 
 # Renders :p<agent>_pos (agent position) as a line and scatter plot 
 function render_traj(hist, agent)
-    color = (; p1=:blue, p2=:red, p3=:green)[agent]
     id_pos = Symbol("$(agent)_pos")
+    # color = (; p1=:blue, p2=:red, p3=:green)[agent]
 
-    state_x = mapreduce(vcat, hist) do dist # in other words, hist is a dist list
-        map(1:length(dist)) do i
-            dist[i][id_pos][1]
+    # We'd like to go particle-by-particle 
+    #   rather than dist-by-dist
+    hist = debranch_history(hist)
+    for p in 1:length(hist[begin])
+
+        color = [:blue; :red][p % 2 + 1]
+
+        state_x = mapreduce(vcat, hist) do dist::StateDist
+            dist[p][id_pos][1]
         end
-    end
 
-    state_y = mapreduce(vcat, hist) do dist
-        map(1:length(dist)) do i
-            dist[i][id_pos][2]
+        state_y = mapreduce(vcat, hist) do dist
+            dist[p][id_pos][2]
         end
+
+        state_alpha = exp(hist[end].w[p])
+
+        plot!(state_x, state_y,
+                color=color, alpha=.4*(0.8*state_alpha + 0.2), label="")
+
+        plot!(state_x, state_y,
+                seriestype=:scatter,
+                color=color, alpha=state_alpha, label="")
     end
-
-    state_alpha = mapreduce(vcat, hist) do dist
-        map(1:length(dist)) do i
-            q = exp(dist.w[i])
-            # 0.2 + (q * 0.8) # see every particle at least a little
-        end
-    end
-
-
-    # plot!(state_x, state_y,
-    #         color=color, alpha=0.1, label="")
-
-    plot!(state_x, state_y,
-            seriestype=:scatter,
-            color=color, alpha=state_alpha, label="")
 end
+
 
 # Renders :p<agent>_obs (agent's observation) as a scatter plot
 # By default it is assumed the first two elements of the observation

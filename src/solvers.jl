@@ -25,9 +25,9 @@ function solve(callback, game::SensingGame, initial_params, options)
             c1, g1 = Flux.withgradient(θ -> score(θ, 1, false), game_params)
             Random.seed!(r + t ÷ options.steps_per_seed)
             c2, g2 = Flux.withgradient(θ -> score(θ, 2, false), game_params)
-            println("$(c1)\t$(c2)")
+            println("$(c1)")#\t$(c2)")
             apply_gradient!(game_params.policies[:p1], g1[1].policies[:p1])
-            apply_gradient!(game_params.policies[:p2], g2[1].policies[:p2])
+            # apply_gradient!(game_params.policies[:p2], g2[1].policies[:p2])
         catch e
             if e isa InterruptException
                 @warn "Interrupted"
@@ -40,9 +40,10 @@ function solve(callback, game::SensingGame, initial_params, options)
         end
 
         if options.live
-            for prt in particles
-                step!(prt, game_params)
-            end
+            # TODO - step! is broken rn
+            # for prt in particles
+            #     step!(prt, game_params)
+            # end
         else
             restart!.(particles)
         end

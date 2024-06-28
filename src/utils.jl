@@ -36,7 +36,7 @@ end
 
 # Very basic geometry stuff
 function dist2(a, b)
-    (a-b)'*(a-b)
+    (a.-b)'*(a.-b)
 end
 
 angdiff(a, b) = posmod((a - b + π), 2π) - π
@@ -100,7 +100,12 @@ end
 
 # Differentiable sampling
 function dsample(v, n)
-    v[_rand_idxs(length(v), n)]
+    Zygote.ignore() do
+        if n > length(v)
+            v = repeat(v, n÷length(v) + 1)
+        end
+        StatsBase.sample(v, n; replace=false)
+    end
 end
 
 function _rand_idxs(l, n)
@@ -113,8 +118,22 @@ function wsample(items, weights)
     weights = weights ./ sum(weights)
     id = findfirst(cumsum(weights) .> rand())
     if isnothing(id)
-        # This can happen if all the weights are very lower
         return rand(items)
     end
     items[id]
+end
+
+function wdsample(v, w, n)
+    Zygote.ignore() do
+        if n > length(v)
+            v = repeat(v, n÷length(v) + 1)
+            w = repeat(w, n÷length(w) + 1)
+        end
+        StatsBase.wsample(v, w, n; replace=true)
+    end
+end
+
+
+function l2(v)
+    sum(v'*v)
 end
