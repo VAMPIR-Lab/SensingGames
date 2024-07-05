@@ -52,6 +52,12 @@ function Base.getindex(s::State, I::Vararg{Int})::Vector{Float32}
     s.z[I...]
 end
 
+function Base.getindex(s::State, syms::Vector{Symbol})
+    mapreduce(vcat, syms) do q
+        s[q]
+    end
+end
+
 function Base.length(s::State)
     length(s.z)
 end
@@ -149,8 +155,7 @@ function expectation(f, s::StateDist)
     sum(1:length(s)) do i
         c = f(s[i])
         p = exp(s.w[i])
-        q = s[i][:p2_pos]
-        # println("Expectation: $p prob of cost $c from pos $q")
+        # @show p
         p * c
     end
 end
@@ -159,6 +164,12 @@ function alter(state::StateDist, substitutions...)::StateDist
     dict = Dict(substitutions...)
     z::Matrix{Float32} = mapreduce(hcat, state.ids) do id::Symbol
         if id in keys(dict)
+            Zygote.@ignore() do
+                if size(dict[id]) != size(state[id])
+                    throw(DimensionMismatch("Can't set state dist component $id of\
+                     size $(size(state[id])) to value of size $(size(dict[id]))"))
+                end
+            end
             Float32.(dict[id])
         else
             state[id]
@@ -167,7 +178,6 @@ function alter(state::StateDist, substitutions...)::StateDist
 
     StateDist(z, state.w, state.ids, state.map)
 end
-
 
 function reweight(state::StateDist, w)
     w_new = state.w .+ vec(w)

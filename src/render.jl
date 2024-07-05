@@ -2,14 +2,14 @@
 # Renders :p<agent>_pos (agent position) as a line and scatter plot 
 function render_traj(hist, agent)
     id_pos = Symbol("$(agent)_pos")
-    # color = (; p1=:blue, p2=:red, p3=:green)[agent]
+    color = (; p1=:blue, p2=:red, p3=:green)[agent]
 
     # We'd like to go particle-by-particle 
     #   rather than dist-by-dist
     hist = debranch_history(hist)
     for p in 1:length(hist[begin])
 
-        color = [:blue; :red][p % 2 + 1]
+        # color = [:blue; :red][p % 2 + 1]
 
         state_x = mapreduce(vcat, hist) do dist::StateDist
             dist[p][id_pos][1]

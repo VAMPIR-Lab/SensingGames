@@ -114,7 +114,7 @@ function test_localization()
     solve(localization_game, initial_params, options) do (t, particles, params)
         plt = plot(aspect_ratio=:equal, lims=(-3, 3))
         title!("Localization: t=$t")
-        dists = step(localization_game, params, n=options.n_lookahead)
+        dists = rollout(localization_game, params, n=options.n_lookahead)
         render_localization(dists)
         display(plt)
     end

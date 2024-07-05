@@ -1,104 +1,139 @@
 struct SensingGame <: Game
     prior_fn::Function
     dyn_fns::Vector{Function}
-    cost_fn::Function
-
-    history::Vector{StateDist}
-    history_len::Int
 end
 
-function SensingGame(prior_fn::Function, dyn_fns::Vector{Function}, cost_fn::Function; history_len=100)
-    SensingGame(prior_fn, dyn_fns, cost_fn, [], history_len)
-end
+function rollout(g::SensingGame, game_params; n=5)
+    state = g.prior_fn()
+    hist = [state]
 
-function restart!(g::SensingGame)
-    empty!(g.history)
-end
-
-function update!(g::SensingGame, states)
-    for s in states
-        roll!(g.history, s, g.history_len)
-    end
-    states
-end
-
-function step(g::SensingGame, game_params; n=1, lik_check=true)
-    
-
-    past_hist = isempty(g.history) ? [g.prior_fn()] : g.history
-    all_res = [(past_hist, past_hist[end])]
-
-    for t in 1:n
+    for _ in 1:n
         for dyn_fn in g.dyn_fns
-            new_all_res = mapreduce(vcat, all_res) do (hist, current_dist)
-                next_dists = dyn_fn(current_dist, hist, game_params)
-
-                # Returning just a single StateDist is fine
-                if ! (typeof(next_dists) <: AbstractArray{StateDist})
-                    next_dists = [next_dists]
-                end
-
-                [(hist, next_dist) for next_dist in next_dists]
-            end
-            all_res = new_all_res # Zygote bug with variables with the same name
+            state = dyn_fn(state, game_params)
         end
-
-        # We update the history only once every time step
-        #   (not every dynamics substep)
-        new_all_res = map(all_res) do (hist, current_dist)
-            ([hist; current_dist], current_dist)
-        end
-        all_res = new_all_res
+        hist = [hist; state]
     end
-
-    # Check: Over all possible histories,
-    #  the likelihood should be = 1
-    if lik_check
-        lik = 0
-        for (hist, _) in all_res
-            dist = hist[end]
-            lik += sum(exp.(dist.w))
-        end
-        if ! (lik ≈ Float32(1.0))
-            println("Warning: Change of probability density: $lik != 1.0")
-            sleep(10)
-        end
-    end
-
-    [hist for (hist, _) in all_res]
+    
+    hist
 end
 
-function make_cross_step(dyn_fn, ll_fn, id, n)
+
+# In general a game is a sequence of steps.
+#   Each step function maps from the current state distribution
+#   (which is being rolled out) and the current game params
+#   (which are subject to optimization) to the next state
+#   distribution.
+#   For the most part state distributions and single states
+#   behave identically for this purpose.
+# Each step function is a closure: we define e.g. `make_step`
+#   to give it all its parameters, and that spits out whatever
+#   piece of state that it needs, and a `step` function
+#   that actually performs the step.
+
+# This works nicely for a few reasons:
+# * Steps can call `alter(::State, pairs...)` to move to the next
+#   state. This doesn't do any in-place array modification, so it's
+#   Zygote-safe.
+# * States are symbol indexed. We can merge all the state fragments
+#   into one big state and the step functions will all still work
+#   regardless of the organization of the state in memory or the 
+#   other state functions that might be present.
+
+# Beware of the danger of closures / type instability when
+#   writing steps. The performance impact is small but insidious.
+
+
+function make_hist_step(agent, ids, m, t_max)
+    id_hist = Symbol(agent, "_hist")
+
+    function hist_step(dist, params)
+        hist = [dist[ids] dist[id_hist]][:, begin:(m*t_max)]
+
+        alter(dist,
+            id_hist => hist
+        )
+    end
+
+    s = State(id_hist => m*t_max)
+    s = alter(s, 
+        id_hist => s[id_hist] .+ 0
+    )
+    
+    s, hist_step
+end
+
+function make_clock_step(dt)
+    function clock_step(dist, params)
+        t = Zygote.ignore() do 
+            dist[:t] 
+        end
+        # t = dist[:t] .+ dt
+        alter(dist, :t => t .+ dt)
+    end
+    State(:t => 1), clock_step
+end
+
+function make_cross_step(dyn_fn, ll_fn, alter_id, info_id, n)
 
     num_reps = ((n isa AbstractVector) ? (t) -> n[t] : (t) -> n) 
 
-    function cross_dyn(state_dist, history, game_params)
+    infoset_id = 1
 
-        r = num_reps(length(history))
-        m = length(state_dist)
+    function cross_step(state_dist, game_params)
 
-        rep_dist = draw(state_dist; n=r)
-        out_dist = dyn_fn(rep_dist, history, game_params)
-        lls = ll_fn(state_dist, out_dist) #.+ 0.01
-        # lls = softclamp.(lls, -20, 20)
-        lls = Float32.(lls .- log.(sum(exp.(lls), dims=2)))
+        t = Int(state_dist[:t][1]) 
+        if t == 1
+            infoset_id = 1
+        end
 
-        z_new = repeat(state_dist.z, outer=(r, 1))
-        w_new = repeat(state_dist.w, outer=(r, 1)) 
-        w_new = vec(w_new .+ reshape(lls, (:)))
+        r = num_reps(t)
         
-        res = StateDist(z_new, w_new, state_dist.ids, state_dist.map)
-        alter(res,
-            id => repeat(out_dist[id], inner=(m, 1))
+        infosets = Zygote.ignore() do 
+            unique(state_dist[info_id])
+        end
+
+        dists = map(infosets) do infoset
+            rows = vec(state_dist[info_id] .== infoset)
+
+
+            info_dist = StateDist(
+                state_dist.z[rows, :],
+                state_dist.w[rows],
+                state_dist.ids,
+                state_dist.map
+            )
+            m = length(info_dist)
+
+            rep_dist = draw(info_dist; n=r)
+
+            out_dist = dyn_fn(rep_dist, game_params)
+            lls = ll_fn(info_dist, out_dist)
+            lls = Float32.(lls .- log.(sum(exp.(lls), dims=2)))
+
+            z_new = repeat(info_dist.z, outer=(r, 1))
+            w_new = repeat(info_dist.w, outer=(r, 1)) 
+            w_new = vec(w_new .+ reshape(lls, (:)))
+            info_new = Float32.([infoset_id:(infoset_id+r-1)...])
+            info_new = repeat(info_new, inner=(m, 1))
+            
+            res = StateDist(z_new, w_new, state_dist.ids, state_dist.map)
+
+            res = alter(res,
+                alter_id => repeat(out_dist[alter_id], inner=(m, 1)),
+                info_id => info_new
+            )
+            infoset_id += r
+
+            res
+        end
+
+        StateDist(
+            vcat([dist.z for dist in dists]...),
+            vcat([dist.w for dist in dists]...),
+            dists[begin].ids,
+            dists[begin].map
         )
     end
-end
 
-
-function step!(g::SensingGame, game_params; n=1)
-    update!(g, step(g, game_params; n))
-end
-
-function clone(g::SensingGame)
-    SensingGame(g.prior_fn, g.dyn_fns, g.cost_fn; history_len=g.history_len)
+    State(info_id => 1), cross_step
 end

@@ -13,7 +13,7 @@ function make_vel_dynamics(agent::Symbol; dt=1.0, dims=2, control_scale=1.0)
         id_vel => dims
     )
 
-    function dyn!(state::StateDist, history, game_params)
+    function dyn!(state::StateDist, game_params)
         pos = state[id_pos] + dt*state[id_vel]*control_scale
         alter(state,
             id_pos => pos
@@ -24,7 +24,7 @@ function make_vel_dynamics(agent::Symbol; dt=1.0, dims=2, control_scale=1.0)
 end
 
 # Planar acceleration integrator
-function make_acc_dynamics(agent::Symbol; dt=1.0, dims=2, drag=0.4, control_scale=1.0)
+function make_acc_dynamics(agent::Symbol; dt=1.0, dims=2, drag=0.0, control_scale=1.0)
     id_pos = Symbol("$(agent)_pos")
     id_vel = Symbol("$(agent)_vel")
     id_acc = Symbol("$(agent)_acc")
@@ -35,14 +35,14 @@ function make_acc_dynamics(agent::Symbol; dt=1.0, dims=2, drag=0.4, control_scal
         id_acc => dims
     )
 
-    function dyn!(state::StateDist, history, game_params)
-        acc = dt*state[id_acc] * control_scale
-        vel = dt*state[id_vel]*(1-drag) .+ acc
-        pos = state[id_pos] + vel + 0.5*acc.^2
+    function dyn!(state::StateDist, game_params)
+        acc = state[id_acc] .* control_scale
+        vel = state[id_vel] .+ acc*dt
+        pos = state[id_pos] .+ state[id_vel] .+ 0.5.*acc*dt.^2
 
         alter(state, 
-            id_pos => pos,
-            id_vel => vel
+            id_pos => Float32.(pos),
+            id_vel => Float32.(vel)
         )
     end
     
@@ -61,7 +61,7 @@ function make_unicycle_dynamics(agent::Symbol; dt=1.0)
         id_u => 2
     )
 
-    function dyn!(state::StateDist, history, game_params)
+    function dyn!(state::StateDist, game_params)
         v = 0.1 
         # θ = game_params.dθ
         # dθ = 0

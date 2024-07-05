@@ -31,12 +31,18 @@ function sample_trunc_gauss(mean, var, a, b)
 end
 
 function gauss_logpdf(x, mean, var)
+    # p = gauss_pdf(x, mean, var) + 0.01
+    # log(p)
     -0.5 * (x-mean)^2 / var - log(2π * var)/2
+end
+
+function gauss_pdf(x, mean, var)
+    exp(-0.5 *(x-mean)^2/var) / sqrt(2π*var)
 end
 
 # Very basic geometry stuff
 function dist2(a, b)
-    (a.-b)'*(a.-b)
+    sum((a.-b).^2)
 end
 
 angdiff(a, b) = posmod((a - b + π), 2π) - π

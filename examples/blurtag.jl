@@ -5,12 +5,13 @@
 function make_blurtag_sensing(agent, other; blur_coef, n)
     id_obs = Symbol("$(agent)_obs")
     id_own_pos = Symbol("$(agent)_pos")
+    id_infoset = Symbol("$(agent)_info")
     id_own_vel = Symbol("$(agent)_vel")
     id_other_pos = Symbol("$(other)_pos")
 
-    function obs_dyn(state_dist::StateDist, history::Vector{StateDist}, game_params)
+    function obs_dyn(state_dist::StateDist, game_params)
         μ = state_dist[id_other_pos]
-        σ2 = 5 .+ blur_coef*(sum((state_dist[id_own_vel]).^2, dims=2))
+        σ2 = 1 .+ blur_coef*(sum((state_dist[id_own_vel]).^2, dims=2))
         obs = sample_gauss.(μ, σ2)
 
         alter(state_dist, 
@@ -26,44 +27,51 @@ function make_blurtag_sensing(agent, other; blur_coef, n)
         C = length(compare_dist)
         map(Iterators.product(1:S, 1:C)) do (s, c)
             μ = state_dist[s][id_other_pos]
-            σ2 = 5 .+ blur_coef*(sum((state_dist[s][id_own_vel]).^2))
+            σ2 = 1 .+ blur_coef*(sum((state_dist[s][id_own_vel]).^2))
             obs = compare_dist[c][id_obs]
-            sum(SensingGames.gauss_logpdf.(obs, μ, σ2))
+            sum(log.(SensingGames.gauss_pdf.(obs, μ, σ2) .+ 0.001))
         end
 
         # obs = reshapecompare_dist[id_obs]
         # sum(SensingGames.gauss_logpdf.(obs, μ, σ2), dims=2)
     end
 
-    State(id_obs => 2), 
-    make_cross_step(obs_dyn, sensing_lik, id_obs, n)
+    info_zero, cross_dyn = make_cross_step(obs_dyn, sensing_lik, id_obs, id_infoset, n)
+    merge(State(id_obs => 2), info_zero), cross_dyn 
+    
 end
 
-function make_blurtag_cost()
-    function cost(dist_hists)
-        sum(dist_hists) do hist
-            c = expectation(hist[end]) do state
-                [ (dist2(state[:p1_pos], state[:p2_pos]));
-                 -(dist2(state[:p1_pos], state[:p2_pos]))]
-            end
-            r = sum(hist) do state_dist
-                expectation(state_dist) do state
-                    @show state[:p1_acc]
-                    [ cost_regularize(state[:p1_acc], α=1);
-                      cost_regularize(state[:p2_acc], α=1)]
-                end
-            end
-            c #+ r
+function make_blurtag_costs()
+    function cost1(hist)
+        expectation(hist[end]) do state
+            dist2(state[:p1_pos], state[:p2_pos])
+        end + 
+        sum(hist) do dist
+            expectation(dist) do state
+                cost_regularize(state[:p1_acc], α=0.1)
+            end 
         end
     end
+    function cost2(hist)
+        expectation(hist[end]) do state
+            -dist2(state[:p1_pos], state[:p2_pos])
+        end + 
+        sum(hist) do dist
+            expectation(dist) do state
+               cost_regularize(state[:p2_acc], α=0.1)
+            end 
+        end
+    end
+
+    (; p1=cost1, p2=cost2)
 end
 
 function make_blurtag_prior(zero_state; n=10)
 
-    p1_pos = [-15.0  15; -15 -15]
-    p2_pos = [ 15.0  15;  15 -15]
+    p1_pos = [-15.0 20; -15 -20]
+    p2_pos = [ 10.0 10;  10 -10]
     p1_vel = [4*ones(2) zeros(2)]
-    p2_vel = zeros((2,2))
+    p2_vel = [4*ones(2) zeros(2)]
     # p1_pos = [fill(-10, n) 10 * randn(n)]
     # p1_vel = (randn(n, 2) .+ [2 -2])
     # p2_pos = [fill(10, n)  10 * randn(n)]
@@ -81,65 +89,56 @@ function make_blurtag_prior(zero_state; n=10)
     end
 end
 
-function render_blurtag(dists)
-    for h in dists
-        for agent in [:p1, :p2]
-            render_obs(h, agent)
-            render_traj(h, agent)
-            # render_heading(h, agent)
-        end
+function render_blurtag(hist)
+    for agent in [:p1, :p2]
+        render_obs(hist, agent)
+        render_traj(hist, agent)
+        # render_heading(h, agent)
     end
 end
 
 function test_blurtag()
-    state1, sdyn1 = make_acc_dynamics(:p1; control_scale=3, drag=0.0)
-    state2, sdyn2 = make_acc_dynamics(:p2; control_scale=3, drag=0.0)
+    timestate, clock = make_clock_step(1.0)
+
+    hist1, shist1 = make_hist_step(:p1, [:p1_pos; :p1_obs], 4, 5)
+    hist2, shist2 = make_hist_step(:p2, [:p2_pos; :p2_obs], 4, 5)
+
+    state1, sdyn1 = make_acc_dynamics(:p1; control_scale=8)
+    state2, sdyn2 = make_acc_dynamics(:p2; control_scale=0.5)
+
     _, bdyn1 = make_bound_dynamics(:p1_pos, -22, 22)
     _, bdyn2 = make_bound_dynamics(:p2_pos, -22, 22)
 
-    obs1, odyn1 = make_blurtag_sensing(:p1, :p2; blur_coef=200, n=[2; 8; 2; 1; 1])
-    obs2, odyn2 = make_blurtag_sensing(:p2, :p1; blur_coef=200, n=1)
+    obs1, odyn1 = make_blurtag_sensing(:p1, :p2; blur_coef=20.0, n=[1; 8; 1; 1; 1])
+    obs2, odyn2 = make_blurtag_sensing(:p2, :p1; blur_coef=20.0, n=[1; 1; 1; 1; 1])
+    zero_state = merge(timestate, hist1, hist2, state1, state2, obs1, obs2)
 
-    ctrl1 = make_horizon_control(:p1, [:p1_obs; :p1_pos], :p1_acc)
-    ctrl2 = make_horizon_control(:p2, [:p2_obs; :p2_pos], :p2_acc)
+    pol1, ctrl1 = make_nn_control(:p1, :p1_hist, :p1_acc, 4, 2)
+    pol2, ctrl2 = make_nn_control(:p2, :p2_hist, :p2_acc, 4, 2)
+    init_params = (; p1=pol1, p2=pol2)
 
-    zero_state = merge(state1, state2, obs1, obs2)
-
-    dyn_fns = [odyn1, ctrl1, sdyn1, sdyn2]
+    dyn_fns = [clock, odyn1, odyn2, shist1, shist2, ctrl1, ctrl2, sdyn1, sdyn2]
     prior_fn = make_blurtag_prior(zero_state)
-    cost_fn = make_blurtag_cost()
+    cost_fns = make_blurtag_costs()
 
-    blurtag_game = SensingGame(prior_fn, dyn_fns, cost_fn)
+    blurtag_game = SensingGame(prior_fn, dyn_fns)
+
     options = (;
-        parallel = false,
-        n_particles = 1,
         n_lookahead = 5,
         n_render = 1,
-        n_iters = 1000,
-        live=true,
-        score_mode = :last, # TODO doesn't do anything rn
-        steps_per_seed = 10000
+        n_iters = 400,
+        steps_per_seed = 1000
     )
 
-    make_model() = Chain(
-        Dense(4 =>  32, relu),
-        Dense(32 => 64, relu),
-        Dense(64 => 2)
-    )
+    iter = 1
+    solve(blurtag_game, init_params, cost_fns, options) do params
+        hist = rollout(blurtag_game, params, n=options.n_lookahead)
 
-    initial_params = (; 
-        policies = (;
-            p1 = FluxPolicy(make_model, 2; lr=0.01, t_max=options.n_lookahead),
-            p2 = FluxPolicy(make_model, 2; lr=0.01, t_max=options.n_lookahead)
-        )
-    )
-
-    solve(blurtag_game, initial_params, options) do (t, particles, params)
-        plt = plot(aspect_ratio=:equal, lims=(-30, 30))
-        title!("Planar blurtag: t=$t")
-        dists = step(blurtag_game, params, n=options.n_lookahead)
-        # hists = last(blurtag_game.history, options.n_lookahead)
-        render_blurtag(dists)
+        plt = plot(aspect_ratio=:equal, lims=(-30, 50))
+        title!("Planar blurtag step=$iter")
+        iter += 1
+        println(iter)
+        render_blurtag(hist)
         display(plt)
     end
 end

@@ -1,104 +1,37 @@
 
-
-struct FluxPolicy <: Policy
-    models::Vector{Flux.Chain}
-    n_output::Int
-    t_max::Int
-    flux_setups::Vector
+struct HistPolicy
+    subpols::Vector
 end
 
-function FluxPolicy(make_model, n_output; lr=0.004, t_max=5)
-    models = [make_model() for _ in 1:t_max]
-    FluxPolicy(
-        models, n_output, t_max,
-        [Flux.setup(Adam(lr), model) for model in models]
-    )
-end
+Flux.@layer HistPolicy
 
-function (policy::FluxPolicy)(history)
-    hist = last(history, policy.t_max)
+function make_nn_control(agent, id_input, id_output, n_input, n_output; t_max=5)
 
-    # It's possible that (because of branching)
-    #   not every state distribution has the same
-    #   number of particles
-    h = size(history[end])[1]
+    function control(dist, game_params)
+        t = Int(dist[:t][1])
+        T = min(t, t_max)
+        history = dist[id_input]
 
-    result = sum(enumerate(reverse(hist))) do (t, obs)
-        
+        model = game_params[agent]
 
-        # The last index for Flux models is assumed to be batch
-        # In StateDists the first index is the batch
-        # (because Julia is column major and we 
-        # tend to pull state components more frequently
-        # than we pull state particles)
-
-        m::Flux.Chain = policy.models[t]
-        r = 0.01 * m(obs')'
-        # @show h/size(r)[1]
-        # @show size(r)
-        mapreduce(vcat, 1:(h/size(r)[1])) do _
-            r
+        action = sum(1:T) do t
+            in = history[:, (1:n_input) .+ n_input*(t-1)]
+            model.subpols[t](transpose(in))'
         end
-    end
 
-    # result ./ sqrt.(sum(result.^2, dims=2))
-    tanh.(result)
-end
+        in = dist[Symbol(agent, :_pos)]'
 
-function apply_gradient!(policy::FluxPolicy, grads)
-    for (i, m) in enumerate(policy.models)
-        Flux.update!(policy.flux_setups[i], m, grads.models[i])
-    end
-end
-
-
-struct RandomPolicy <: Policy
-    n_output
-end
-
-function (policy::RandomPolicy)(history)
-    0.2 * tanh.(randn(policy.n_output))
-end
-
-
-struct BoundedRandomPolicy <: Policy
-    n_output
-end
-
-function (policy::BoundedRandomPolicy)(history)
-    # assume observation is position
-    dir = (rand(2).-0.5) * 20
-    dx = history[end] - dir
-    -dx / sum(dx .^ 2)
-end
-
-
-# struct ZeroPolicy <: Policy
-#     n_output
-# end
-
-# function (policy::ZeroPolicy)(history)
-#     (zeros(policy.n_output))
-# end
-
-
-function _act(policy::Policy, obs_history)
-    # type barrier for optimization
-    policy(obs_history)
-end
-
-function make_horizon_control(agent::Symbol, ids_obs::Union{Symbol, Vector{Symbol}}, id_action::Symbol)
-    function dyn!(state::StateDist, history::Vector{StateDist}, game_params)::StateDist
-        
-        current_obs = [state[ids_obs]]
-        past_obs = map(s -> s[ids_obs], history)
-        obs_history = [past_obs; current_obs] 
-
-        action = _act(game_params.policies[agent], obs_history)
-        alter(state, 
-            id_action => action
+        alter(dist, 
+            id_output => tanh.(0.01 * action)
         )
-    end 
-    # no point to returning state components here; there are none
-end
+    end
 
+    models = HistPolicy([
+        Chain(
+            Dense(n_input => 16),
+            Dense(16 => 32, relu),
+            Dense(32 => n_output)
+        ) for _ in 1:t_max]
+    )
+    models, control
+end
