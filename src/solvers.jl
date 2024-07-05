@@ -8,7 +8,7 @@
 #
 # You can supply a callback (i.e. with a `do` block); it will receive (t, particles, params)
 #   on every step to be used for output display or rendering.   
-function solve_unrelated_particles(callback, game::SensingGame, initial_params, options)
+function solve_unrelated_particles(game::SensingGame, initial_params, options, get_hists, vis_options, render_game!)
     game_params = initial_params
     particles = [clone(game) for _ in 1:options.n_particles]
 
@@ -25,16 +25,23 @@ function solve_unrelated_particles(callback, game::SensingGame, initial_params, 
             end
         end / options.n_particles
     end
-
+    
+    fig, ax, iter = init_window(vis_options)
+    
     for t in 1:options.n_iters
+        
+        if !Base.isopen(fig.scene)
+            println("Window closed. Program terminated.")
+            break
+        end
         try
-            c1, g1 = Flux.withgradient(θ -> score(θ, 1, (t>1)), game_params)
-            c1, g2 = Flux.withgradient(θ -> score(θ, 2, (t>1)), game_params)
+            c1, g1 = Flux.withgradient(θ -> score(θ, 1, false), game_params)
+            c1, g2 = Flux.withgradient(θ -> score(θ, 2, false), game_params)
             apply_gradient!(game_params.policies[:p1], g1[1].policies[:p1])
             apply_gradient!(game_params.policies[:p2], g2[1].policies[:p2])
         catch e
-            if e isa InterruptException
-                @warn "Interrupted"
+            if isa(err, InterruptException)
+                @warn "Interrpted..."
                 return
             else
                 @warn "Gradient failed with $e; attempting to continue..."
@@ -47,7 +54,13 @@ function solve_unrelated_particles(callback, game::SensingGame, initial_params, 
                 step!(prt, game_params)
             end
         end
-
-        callback((t, particles, game_params))
+        
+        # callback((t, particles, game_params))
+        hists = get_hists(options, particles, game_params)
+        render_game!(ax, hists)
+        sleep(0.01)
+        empty!(ax)
+        iter[] = t
     end
+    
 end

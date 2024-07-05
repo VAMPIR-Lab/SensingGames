@@ -43,14 +43,18 @@ function make_blurtag_prior(zero_state)
     ) 
 end
 
-function render_blurtag(hists)
+function render_blurtag!(ax, hists)
     for h in hists
         for agent in [:p1, :p2]
-            render_traj(h, agent)
-            render_obs(h, agent; range=3:4)
-            render_heading(h, agent)
+            render_traj!(ax, h, agent)
+            render_obs!(ax, h, agent; range=3:4)
+            render_heading!(ax, h, agent)
         end
     end
+end
+
+function get_blurtag_hists(options, particles, params)
+    [last(prt.history, options.n_lookahead) for prt in particles]
 end
 
 function test_blurtag()
@@ -95,11 +99,11 @@ function test_blurtag()
         )
     )
 
-    solve_unrelated_particles(blurtag_game, initial_params, options) do (t, particles, params)
-        plt = plot(aspect_ratio=:equal, lims=(-30, 30))
-        title!("Planar blurtag: t=$t")
-        hists = [last(prt.history, options.n_lookahead) for prt in particles]
-        render_blurtag(hists)
-        display(plt)
-    end
+    vis_options = (;
+        name = "Blur Tag",
+        win_size = (800, 600), 
+        ax_lims = ((-30, 30), (-30, 30)) 
+    )
+
+    solve_unrelated_particles(blurtag_game, initial_params, options, get_blurtag_hists, vis_options, render_blurtag!)
 end

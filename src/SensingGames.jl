@@ -14,8 +14,8 @@ using ChainRulesCore
 using JLD2
 
 ## Visualization
-# using Makie, GLMakie
-using Plots
+using Makie, GLMakie
+# using Plots
 
 ## Collections management
 # using BlockArrays
@@ -28,6 +28,7 @@ using Infiltrator
 using Debugger
 # using Wandb
 using Logging
+using Revise
 
 abstract type Policy end
 abstract type AbstractState end

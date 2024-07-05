@@ -42,12 +42,19 @@ function make_localization_prior(zero_state)
     ) 
 end
 
-function render_localization(hists)
+function render_localization!(ax, hists)
     for h in hists
         for agent in [:p1, :p2]
-            render_traj(h, agent)
+            render_traj!(ax, h, agent)
         end
     end
+    # for h in hists
+    #     render_traj!(ax, h, :p2)
+    # end
+end
+
+function get_localization_hists(options, particles, params)
+    [step(prt, params, n=options.n_lookahead) for prt in particles]
 end
 
 function test_localization()
@@ -77,6 +84,11 @@ function test_localization()
         score_mode = :last
     )
 
+    vis_options = (;
+        name = "Localization",
+        win_size = (800, 600), 
+        ax_lims = ((-3, 3), (-3, 3))    
+    )
     
     make_model() = Chain(Dense(2 => 2))
 
@@ -87,11 +99,5 @@ function test_localization()
         )
     )
 
-    solve_unrelated_particles(localization_game, initial_params, options) do (t, particles, params)
-        plt = plot(aspect_ratio=:equal, lims=(-3, 3))
-        title!("Localization: t=$t")
-        hists = [step(prt, params, n=options.n_lookahead) for prt in particles]
-        render_localization(hists)
-        display(plt)
-    end
+    solve_unrelated_particles(localization_game, initial_params, options, get_localization_hists, vis_options, render_localization!)
 end

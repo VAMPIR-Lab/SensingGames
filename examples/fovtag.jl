@@ -57,15 +57,20 @@ function make_fovtag_prior(zero_state)
     ) 
 end
 
-function render_fovtag(hists)
+function render_fovtag!(ax, hists)
     for h in hists
         for agent in [:p1, :p2]
-            render_traj(h, agent)
-            render_obs(h, agent; range=3:4)
-            render_heading(h, agent)
+            render_traj!(ax, h, agent)
+            render_obs!(ax, h, agent; range=3:4)
+            render_heading!(ax, h, agent)
         end
     end
 end
+
+function get_fovtag_hists(options, particles, params)
+    [last(prt.history, options.n_lookahead) for prt in particles]
+end
+
 
 function test_fovtag()
     state1, sdyn1 = make_acc_dynamics(:p1; control_scale=1, drag=0.5)
@@ -109,11 +114,11 @@ function test_fovtag()
         )
     )
 
-    solve_unrelated_particles(fovtag_game, initial_params, options) do (t, particles, params)
-        plt = plot(aspect_ratio=:equal, lims=(-30, 30))
-        title!("Planar fovtag: t=$t")
-        hists = [last(prt.history, options.n_lookahead) for prt in particles]
-        render_blurtag(hists)
-        display(plt)
-    end
+    vis_options = (;
+        name = "Fov Tag",
+        win_size = (800, 600), 
+        ax_lims = ((-30, 30), (-30, 30)) 
+    )
+    
+    solve_unrelated_particles(fovtag_game, initial_params, options, get_fovtag_hists, vis_options, render_fovtag!)
 end
