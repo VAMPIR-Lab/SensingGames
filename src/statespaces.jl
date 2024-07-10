@@ -198,6 +198,8 @@ function draw(dist::StateDist; n=1, as_dist=true)
     end
 end
 
+
+
 # When state spaces get more particles 
 #   (as a result of e.g. cross dynamics)
 #   the history can have inconsistent numbers 

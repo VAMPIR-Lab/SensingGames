@@ -16,19 +16,20 @@ function gauss_cdf(mean, var, x)
 end
 
 function sample_gauss(mean, var)
-    inverse_gauss_cdf(mean, var, rand())
+    rng = SensingGames._game_rng
+    inverse_gauss_cdf(mean, var, rand(rng))
 end
 
-function sample_trunc_gauss(mean, var, a, b)
-    # Note that mean and variance correspond to the original
-    #   distribution (before truncating) - the 
-    #   moments after truncating will be different
-    prc1 = gauss_cdf(mean, var, a)
-    prc2 = gauss_cdf(mean, var, b)
-    r = rand() * (prc2 - prc1) + prc1
-    v = log(1/r - 1) * sqrt(var) / -1.702 + mean
-    return v
-end
+# function sample_trunc_gauss(mean, var, a, b)
+#     # Note that mean and variance correspond to the original
+#     #   distribution (before truncating) - the 
+#     #   moments after truncating will be different
+#     prc1 = gauss_cdf(mean, var, a)
+#     prc2 = gauss_cdf(mean, var, b)
+#     r = rand() * (prc2 - prc1) + prc1
+#     v = log(1/r - 1) * sqrt(var) / -1.702 + mean
+#     return v
+# end
 
 function gauss_logpdf(x, mean, var)
     # p = gauss_pdf(x, mean, var) + 0.01
@@ -110,13 +111,13 @@ function dsample(v, n)
         if n > length(v)
             v = repeat(v, n÷length(v) + 1)
         end
-        StatsBase.sample(v, n; replace=false)
+        StatsBase.sample(_game_rng, v, n; replace=false)
     end
 end
 
 function _rand_idxs(l, n)
     Zygote.ignore() do 
-        Random.shuffle(1:l)[1:n]
+        Random.shuffle(_game_rng, 1:l)[1:n]
     end
 end
 
@@ -124,18 +125,18 @@ function wsample(items, weights)
     weights = weights ./ sum(weights)
     id = findfirst(cumsum(weights) .> rand())
     if isnothing(id)
-        return rand(items)
+        return rand(_game_rng, items)
     end
     items[id]
 end
 
 function wdsample(v, w, n)
     Zygote.ignore() do
-        if n > length(v)
-            v = repeat(v, n÷length(v) + 1)
-            w = repeat(w, n÷length(w) + 1)
-        end
-        StatsBase.wsample(v, w, n; replace=true)
+        # if n > length(v)
+        #     v = repeat(v, n÷length(v) + 1)
+        #     w = repeat(w, n÷length(w) + 1)
+        # end
+        StatsBase.wsample(_game_rng, v, w, n; replace=true)
     end
 end
 

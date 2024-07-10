@@ -43,12 +43,11 @@ end
 #   writing steps. The performance impact is small but insidious.
 
 
-function make_hist_step(agent, ids, m, t_max)
-    id_hist = Symbol(agent, "_hist")
+function make_hist_step(id_hist, ids, m, t_max)
 
     function hist_step(dist, params)
         hist = [dist[ids] dist[id_hist]][:, begin:(m*t_max)]
-
+        
         alter(dist,
             id_hist => hist
         )
@@ -77,13 +76,13 @@ function make_cross_step(dyn_fn, ll_fn, alter_id, info_id, n)
 
     num_reps = ((n isa AbstractVector) ? (t) -> n[t] : (t) -> n) 
 
-    infoset_id = 1
+    infoset_num = 1
 
     function cross_step(state_dist, game_params)
 
         t = Int(state_dist[:t][1]) 
         if t == 1
-            infoset_id = 1
+            infoset_num = 1
         end
 
         r = num_reps(t)
@@ -92,9 +91,10 @@ function make_cross_step(dyn_fn, ll_fn, alter_id, info_id, n)
             unique(state_dist[info_id])
         end
 
-        dists = map(infosets) do infoset
-            rows = vec(state_dist[info_id] .== infoset)
+        # println("$t => $infosets in $info_id")
 
+        dists = ThreadsX.map(infosets) do infoset
+            rows = vec(state_dist[info_id] .== infoset)
 
             info_dist = StateDist(
                 state_dist.z[rows, :],
@@ -102,38 +102,68 @@ function make_cross_step(dyn_fn, ll_fn, alter_id, info_id, n)
                 state_dist.ids,
                 state_dist.map
             )
+
+            in_weight = sum(exp.(info_dist.w))
+
             m = length(info_dist)
+
 
             rep_dist = draw(info_dist; n=r)
 
             out_dist = dyn_fn(rep_dist, game_params)
             lls = ll_fn(info_dist, out_dist)
+
+            # Enforce ∑[o] P(o | S) = 1 for all S
             lls = Float32.(lls .- log.(sum(exp.(lls), dims=2)))
 
             z_new = repeat(info_dist.z, outer=(r, 1))
             w_new = repeat(info_dist.w, outer=(r, 1)) 
             w_new = vec(w_new .+ reshape(lls, (:)))
-            info_new = Float32.([infoset_id:(infoset_id+r-1)...])
+            info_new = Float32.([infoset_num:(infoset_num+r-1)...])
             info_new = repeat(info_new, inner=(m, 1))
             
-            res = StateDist(z_new, w_new, state_dist.ids, state_dist.map)
-
-            res = alter(res,
+            split_dist = alter(StateDist(z_new, w_new, state_dist.ids, state_dist.map),
                 alter_id => repeat(out_dist[alter_id], inner=(m, 1)),
                 info_id => info_new
             )
-            infoset_id += r
+            infoset_num += r
 
-            res
+            out_weight = sum(exp.(split_dist.w))
+
+            Zygote.ignore() do 
+                if ! (out_weight ≈ in_weight)
+                    @warn "Change of branch weight: $out_weight != $in_weight in infoset $info_id=$infoset"
+                end
+            end
+
+            split_dist
         end
 
-        StateDist(
+        res = StateDist(
             vcat([dist.z for dist in dists]...),
             vcat([dist.w for dist in dists]...),
             dists[begin].ids,
             dists[begin].map
         )
+        res
     end
 
     State(info_id => 1), cross_step
+end
+
+
+# Prune unlikely / counterfactual branches from further consideration
+function make_prune_step(n)
+    function prune_step(state_dist, game_params)
+        idxs = Zygote.ignore() do 
+            sortperm(-state_dist.w)
+        end
+
+        StateDist(
+            state_dist.z[idxs],
+            state_dist.w[idxs],
+            state_dist.ids,
+            state_dist.map
+        )
+    end
 end
