@@ -77,14 +77,12 @@ function make_cross_step(dyn_fn, ll_fn, alter_id, info_id, n)
     num_reps = ((n isa AbstractVector) ? (t) -> n[t] : (t) -> n) 
 
     infoset_num = 1
-
     function cross_step(state_dist, game_params)
 
         t = Int(state_dist[:t][1]) 
         if t == 1
             infoset_num = 1
         end
-
         r = num_reps(t)
         
         infosets = Zygote.ignore() do 
@@ -93,7 +91,8 @@ function make_cross_step(dyn_fn, ll_fn, alter_id, info_id, n)
 
         # println("$t => $infosets in $info_id")
 
-        dists = ThreadsX.map(infosets) do infoset
+
+        dists = map(infosets) do infoset
             rows = vec(state_dist[info_id] .== infoset)
 
             info_dist = StateDist(

@@ -193,13 +193,13 @@ function test_fovtag()
 
     iter = 1
     solve(train_fovtag_game, init_params, cost_fns, options) do params
-        hist = rollout(train_fovtag_game, params, n=options.n_lookahead)
+        # hist = rollout(train_fovtag_game, params, n=options.n_lookahead)
 
-        plt = plot(aspect_ratio=:equal, lims=(-70, 70))
-        title!("Planar fovtag step=$iter")
-        iter += 1
-        println(iter)
-        render_fovtag(hist; fov)
-        display(plt)
+        # plt = plot(aspect_ratio=:equal, lims=(-70, 70))
+        # title!("Planar fovtag step=$iter")
+        # iter += 1
+        # println(iter)
+        # render_fovtag(hist; fov)
+        # display(plt)
     end
 end
