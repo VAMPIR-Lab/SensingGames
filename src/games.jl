@@ -3,7 +3,7 @@ struct SensingGame <: Game
     dyn_fns::Vector{Function}
 end
 
-function rollout(g::SensingGame, game_params; n=5)
+function rollout(g::SensingGame, game_params; n=7)
     state = g.prior_fn()
     hist = [state]
 
@@ -72,7 +72,7 @@ function make_clock_step(dt)
     State(:t => 1), clock_step
 end
 
-function make_cross_step(dyn_fn, ll_fn, alter_id, info_id, n)
+function make_cross_step(dyn_fn, ll_fn, alter_id, info_id, n; dedupe=false)
 
     num_reps = ((n isa AbstractVector) ? (t) -> n[t] : (t) -> n) 
 
@@ -89,10 +89,11 @@ function make_cross_step(dyn_fn, ll_fn, alter_id, info_id, n)
             unique(state_dist[info_id])
         end
 
-        # println("$t => $infosets in $info_id")
 
 
         dists = map(infosets) do infoset
+            # quantile = rand(SensingGames._game_rng, r, 2) #[randu.(SensingGames._game_rng, 0.1, 0.9) randu.(SensingGames._game_rng, 0.1, 0.9)]
+            quantile = -1
             rows = vec(state_dist[info_id] .== infoset)
 
             info_dist = StateDist(
@@ -107,10 +108,28 @@ function make_cross_step(dyn_fn, ll_fn, alter_id, info_id, n)
             m = length(info_dist)
 
 
-            rep_dist = draw(info_dist; n=r)
+            # It's possible to get duplicate outputs; dedupe those if desired
+            rep_dist = if dedupe
+                # Zygote.ignore() do
+                    out_dist = dyn_fn(info_dist, game_params, quantile)
+                    unique_idxs = Zygote.ignore() do
+                        unique(i -> out_dist[i][alter_id], 1:length(out_dist))
+                    end
 
-            out_dist = dyn_fn(rep_dist, game_params)
-            lls = ll_fn(info_dist, out_dist)
+                    deduped_out_dist = StateDist(
+                        out_dist.z[unique_idxs, :],
+                        out_dist.w[unique_idxs],
+                        out_dist.ids,
+                        out_dist.map
+                    )
+                    draw(deduped_out_dist, n=r)
+                # end
+            else
+                pre_dist = draw(info_dist, n=r)
+                dyn_fn(pre_dist, game_params, quantile)
+            end
+
+            lls = ll_fn(info_dist, rep_dist)
 
             # Enforce ∑[o] P(o | S) = 1 for all S
             lls = Float32.(lls .- log.(sum(exp.(lls), dims=2)))
@@ -122,7 +141,7 @@ function make_cross_step(dyn_fn, ll_fn, alter_id, info_id, n)
             info_new = repeat(info_new, inner=(m, 1))
             
             split_dist = alter(StateDist(z_new, w_new, state_dist.ids, state_dist.map),
-                alter_id => repeat(out_dist[alter_id], inner=(m, 1)),
+                alter_id => repeat(rep_dist[alter_id], inner=(m, 1)),
                 info_id => info_new
             )
             infoset_num += r
@@ -152,17 +171,17 @@ end
 
 
 # Prune unlikely / counterfactual branches from further consideration
-function make_prune_step(n)
-    function prune_step(state_dist, game_params)
-        idxs = Zygote.ignore() do 
-            sortperm(-state_dist.w)
-        end
+# function make_prune_step(n)
+#     function prune_step(state_dist, game_params)
+#         idxs = Zygote.ignore() do 
+#             sortperm(-state_dist.w)
+#         end
 
-        StateDist(
-            state_dist.z[idxs],
-            state_dist.w[idxs],
-            state_dist.ids,
-            state_dist.map
-        )
-    end
-end
+#         StateDist(
+#             state_dist.z[idxs],
+#             state_dist.w[idxs],
+#             state_dist.ids,
+#             state_dist.map
+#         )
+#     end
+# endZ

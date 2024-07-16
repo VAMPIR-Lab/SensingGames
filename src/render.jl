@@ -1,125 +1,172 @@
+abstract type Renderer end
 
-# Renders :p<agent>_pos (agent position) as a line and scatter plot 
-function render_traj(hist, agent; m=4, prt=nothing)
-    id_hist = Symbol(agent, "_hist")
-    end_dist = hist[end]
-    color = (; p1=:blue, p2=:red, p3=:green)[agent]
-
-    # T = 2
-    T = length(hist)
-    # We'd like to go particle-by-particle 
-    #   rather than dist-by-dist
-    hist = debranch_history(hist)
-
-    infosets = unique(hist[end][:p1_info])
-
-
-    for p in (isnothing(prt) ? (1:length(end_dist)) : [prt]) 
-
-        
-        state = end_dist[p]
-        p1_set = abs(Int(state[:p1_info][1]))
-        color = [:red, :red, :blue, :blue][findfirst(infosets .== p1_set)]
-
-        h = reshape(state[id_hist], (m, :))
-        state_x = h[1, :]
-        state_y = h[2, :]
-
-        state_alpha = isnothing(prt) ? exp(hist[end].w[p]) : 1.0
-        
-        labels = map(1:T) do t
-            string(t)
-        end
-
-        plot!(state_x, state_y,
-                color=color, alpha=.4*(0.8*state_alpha + 0.2), label="", hover=labels)
-
-        plot!(state_x, state_y,
-                seriestype=:scatter,
-                color=color, alpha=state_alpha, label="", hover=labels)
-    end
+mutable struct MakieRenderer <: Renderer
+    figure::Figure
+    state_dist::Union{Nothing, Observable{StateDist}}
 end
 
-function render_obs(hist, agent; m=4, prt=nothing)
-    id_hist = Symbol(agent, "_hist")
-    end_dist = hist[end]
-    color = (; p1=:purple, p2=:orange, p3=:cyan)[agent]
+function MakieRenderer()
+    fig = Figure()
+    Base.display(fig)
+    MakieRenderer(
+        fig,
+        nothing
+    )
+end
+# Render an entire distribution
+#   Doesn't require render context (top level)
+function render_dist(f, renderer::MakieRenderer, state_dist::StateDist; kargs...)
+    if isnothing(renderer.state_dist)
+        # We haven't rendered yet - let's set up
+        renderer.state_dist = Observable(state_dist)
+        for i in 1:length(state_dist)
+            weight=@lift(exp($(renderer.state_dist).w[i]))
+            
+            row = (i-1)%4+1
+            col = (i-1)÷4+1
+            max_row = (length(state_dist)-1)%4+1
 
-    # We'd like to go particle-by-particle 
-    #   rather than dist-by-dist
-    hist = debranch_history(hist)
+            lims = default(kargs, :lims, (-50, 50))
 
-    T = length(hist)
+            backgroundcolor = @lift($weight < 0.0005 ? :grey : :white)
+            
+            ax = Axis(
+                renderer.figure[row, col];
+                backgroundcolor
+                )
+            row == max_row || hidexdecorations!(ax, grid=false)
+            col == 1 || hideydecorations!(ax, grid=false)
+            xlims!(ax, lims)
+            ylims!(ax, lims)
 
-    for p in (isnothing(prt) ? (1:length(end_dist)) : [prt]) 
-        
-        state = end_dist[p]
-        h = reshape(state[id_hist], (m, :))
-        obs_x = h[3, :]
-        obs_y = h[4, :]
 
-        # state_alpha = isnothing(prt) ? exp(hist[end].w[p]) : 1.0
-        state_alpha = 0.3
+            context = (; 
+                renderer, 
+                prt=i, 
+                lims,
+                ax,
+                weight=1.0 # For testing purposes
+            )
 
-        # hover = ["1"; "2"; "3"]
-        labels = map(1:T) do t
-            string(t)
+            f((@lift($(renderer.state_dist)[i]), context))
+
+            info_1 = @lift(Int($(renderer.state_dist)[i][:p1_info][]))
+            info_2 = @lift(Int($(renderer.state_dist)[i][:p2_info][]))
+
+            weight_string = @lift(@sprintf("%.2f", $weight*100))
+            label = @lift(
+                "Reality #($($info_1), $($info_2))" * 
+                # string(i) * 
+                ": " * 
+                $weight_string * 
+                "%")
+            text!(ax, lims[1]+5, lims[2]-10, text=label)
         end
-
-        plot!(obs_x, obs_y,
-                seriestype=:scatter,
-                color=color, alpha=state_alpha, label="", hover=labels)
+    else
+        # We have already rendered; we can just update the Observables
+        renderer.state_dist[] = state_dist
     end
 end
 
 
-function render_heading(hist, agent; m=4, fov=2.0, scale=5, prt=nothing)
-    id_hist = Symbol(agent, "_hist")
-    end_dist = hist[end]
-    color = (; p1=:black, p2=:black, p3=:green)[agent]
+# Renders agents with colors
+#   For now, the same across all renderers
+function render_agents(f, agents, context)
+    colors_primary = (; p1=:blue, p2=:red, p3=:green)
+    colors_secondary = (; p1=:purple, p2=:orange, p3=:yellow)
 
-    for p in (isnothing(prt) ? (1:length(end_dist)) : [prt]) 
-        
-        state = end_dist[p]
-
-        h = reshape(state[id_hist], (m, :))
-        state_x = h[1, :]
-        state_y = h[2, :]
-        v_x = state_x[1:(end-1)] - state_x[2:end]
-        v_y = state_y[1:(end-1)] - state_y[2:end]
-        state_x = state_x[1:(end-1)]
-        state_y = state_y[1:(end-1)]
-
-        v_x = v_x
-        v_y = v_y
-        state_x = state_x
-        state_y = state_y
-        
-
-        spacer = fill(NaN, length(state_x))
-        θ = atan.(v_y, v_x)
-
-        area_x = vec(hcat(
-            state_x,
-            state_x .+ scale * cos.(θ .+ fov/2),
-            spacer,
-            state_x,
-            state_x .+ scale * cos.(θ .- fov/2),
-            spacer
-        )')
-
-        area_y = vec(hcat(
-            state_y,
-            state_y .+ scale * sin.(θ .+ fov/2),
-            spacer,
-            state_y,
-            state_y .+ scale * sin.(θ .- fov/2),
-            spacer
-        )')
-
-        state_alpha = isnothing(prt) ? exp(hist[end].w[p]) : 1.0
-
-        plot!(area_x, area_y,
-                color=color, alpha=state_alpha, label="", linestyle=:dot)
+    for agent in agents
+        context = (; context...,
+            color_primary=colors_primary[agent],
+            color_secondary=colors_secondary[agent],
+            agent
+        )
+        f((agent, context))
     end
+end
+
+# Render a trajectory in `id` (with connecting lines)
+#  e.g. `id = :pos` will render positional trajectory
+function render_traj(renderer::MakieRenderer, states, id, context; fov=1, scale=5)
+    points = @lift(mapreduce(state -> state[id]', vcat, $states))
+
+    color = default(context, :color_primary, :black)
+    alpha = default(context, :weight, 1.0)
+    ax = context.ax
+
+    directions = @lift($(points)[begin+1:end, :] .- $(points)[begin:end-1, :])
+
+    θ = @lift(atan.($directions[:, 2], $directions[:, 1]))
+
+    seg_pts = @lift($points[2:end, :])
+
+    map(1:length(states[])-1) do i
+        vertices = @lift([
+            ($seg_pts[i, 1], $seg_pts[i, 2]), 
+            ($seg_pts[i, 1]+scale*cos($θ[i]+fov/2), $seg_pts[i, 2]+scale*sin($θ[i]+fov/2)),
+            ($seg_pts[i, 1]+scale*cos($θ[i]-fov/2), $seg_pts[i, 2]+scale*sin($θ[i]-fov/2)) 
+        ])
+
+        poly!(ax, vertices; color, alpha=0.2*alpha)
+    end
+
+
+    scatter!(ax,
+        @lift([$points[begin, 1]]),
+        @lift([$points[begin, 2]]);
+        color, alpha
+    )
+
+    lines!(ax, points; color, alpha)
+
+    arrows!(ax, 
+        @lift([$points[end-1, 1]]), 
+        @lift([$points[end-1, 2]]), 
+        @lift([$directions[end, 1]]), 
+        @lift([$directions[end, 2]]);
+        color, alpha=alpha*0.5
+    )
+end
+
+
+# Renders points in a scattered manner 
+function render_points(renderer::MakieRenderer, states, id, context)
+    raw_pairs = @lift(mapreduce(state -> state[id]', vcat, $states)')
+    pairs = @lift(clamp.($raw_pairs, (context.lims .* 0.95)...))
+
+    t = string.(1:length(states[]))
+
+    color = default(context, :color_primary, :grey)
+    alpha = default(context, :weight, 1.0) * 0.5
+    ax = context.ax
+
+    scatter!(ax, pairs; color, alpha, markersize=20, marker='o')
+    text_pairs = @lift($pairs .- [1 1.6])
+    text!(ax, text_pairs , text=t, fontsize=8)
+
+    for i in 1:length(states[])
+        raw = @lift($raw_pairs[:, i])
+        clamped = @lift($pairs[:, i])
+        dist = @lift(sqrt(dist2($raw, $clamped)))
+        text = @lift(@sprintf("%.0fm", $dist))
+        visible = @lift($dist > 0)
+
+        placement = @lift(
+            ($raw[1] > $clamped[1]) ? (:left) :
+            ($raw[1] < $clamped[1]) ? (:right) :
+            ($raw[2] > $clamped[2]) ? (:below) : (:above)
+        )
+
+        tooltip!(ax, @lift($clamped[1]), @lift($clamped[2]); 
+            fontsize=8, text, visible, placement, outline_linewidth=0.5,
+            textpadding=(2, 2, 2, 2))
+    end
+end
+
+function render_info(renderer::MakieRenderer, text, line_num, context)
+    color = default(context, :color_primary, :grey)
+    lims = context.lims
+    ax = context.ax
+
+    text!(ax, lims[1] + 5, lims[1] + (line_num-1)*6 + 5; text, color, fontsize=10)
 end

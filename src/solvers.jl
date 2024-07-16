@@ -8,9 +8,10 @@ function solve(callback, game::SensingGame, game_params, cost_fns, options)
         cost_fns[agent](hist)
     end
 
-    flux_setups = map(game_params) do params
-        Flux.setup(Adam(2e-4), params)
-    end
+    flux_setups = (;
+        p1 = Flux.setup(Adam(1e-3), game_params[:p1]),
+        p2 = Flux.setup(Adam(3e-5), game_params[:p2]),
+    )
 
     for t in 1:options.n_iters
 
@@ -18,7 +19,6 @@ function solve(callback, game::SensingGame, game_params, cost_fns, options)
 
             reseed!(seed + t ÷ options.steps_per_seed)
             c, grads = Flux.withgradient(θ -> score(θ, agent), game_params)
-            @show c
             Flux.Optimisers.update!(flux_setups[agent], params, grads[1][agent])
         end
 

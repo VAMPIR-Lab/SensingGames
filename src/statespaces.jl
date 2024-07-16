@@ -36,6 +36,31 @@ function State(semantics::Pair{Symbol, Int}...)
     )
 end
 
+function Vector{State}(z, semantics::Pair{Symbol, Int}...)
+
+    idx = 1
+
+    ids = [map(semantics) do (id, _)
+        id
+    end...]
+
+    lens = Dict(semantics...)
+
+    m = Dict(map(ids) do (id)
+        l = idx
+        u = (idx += lens[id])
+        id => l:(u-1)
+    end...)
+
+    Z = reshape(z, (idx-1, :))'
+    [State(
+        Z[i, :],
+        ids,
+        m
+    ) for i in 1:size(Z)[1]]
+
+end
+
 function Base.size(s::State)
     Base.size(s.z)
 end
@@ -185,17 +210,21 @@ function reweight(state::StateDist, w)
 end
 
 function draw(dist::StateDist; n=1, as_dist=true)
-    Zygote.ignore() do
+    # Zygote.ignore() do
         # idxs = wdsample(1:length(dist), exp.(dist.w), n)
-        idxs = dsample(1:length(dist), n)
+        # idxs = dsample(1:length(dist), n)
+        # idxs = rand(1:length(dist), n)
+        idxs = repeat(1:length(dist), n ÷ length(dist) + 1)[1:n]
         if as_dist
+            # w = 
+            # w = log.(exp.(w) ./ sum(exp.(w)))
             StateDist(dist.z[idxs, :], dist.w[idxs], dist.ids, dist.map)
         else
             map(idxs) do i
                 State(dist.z[i, :], dist.ids, dist.map)
             end
         end
-    end
+    # end
 end
 
 

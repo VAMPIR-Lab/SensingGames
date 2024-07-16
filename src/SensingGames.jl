@@ -14,8 +14,9 @@ using ChainRulesCore
 using JLD2
 
 ## Visualization
-# using Makie, GLMakie
-using Plots
+using GLMakie
+# using Plots
+using Printf
 
 ## Collections management
 # using BlockArrays

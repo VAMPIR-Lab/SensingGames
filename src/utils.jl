@@ -3,7 +3,7 @@
 # Sampling from Gaussian distributions
 #   We need a closed-ish form of the CDF so that Zygote can
 #   differentiate through it (sadly Distributions.jl does not
-#   fully support it yet)
+#   fully support Zygote yet, or vice versa)
 #   So I use the Bowling approximation, which is accurate to about eps=0.001:
 #       I(x) = 1 / (1 + exp(-1.702(x-mean)/sqrt(var)))
 function inverse_gauss_cdf(mean, var, p)
@@ -20,16 +20,23 @@ function sample_gauss(mean, var)
     inverse_gauss_cdf(mean, var, rand(rng))
 end
 
-# function sample_trunc_gauss(mean, var, a, b)
-#     # Note that mean and variance correspond to the original
-#     #   distribution (before truncating) - the 
-#     #   moments after truncating will be different
-#     prc1 = gauss_cdf(mean, var, a)
-#     prc2 = gauss_cdf(mean, var, b)
-#     r = rand() * (prc2 - prc1) + prc1
-#     v = log(1/r - 1) * sqrt(var) / -1.702 + mean
-#     return v
-# end
+
+function sample_gauss(mean, var, quantile)
+    inverse_gauss_cdf(mean, var, quantile)
+end
+
+function sample_trunc_gauss(mean, var, a, b, quantile)
+    # Note that mean and variance correspond to the original
+    #   distribution (before truncating) - the 
+    #   moments after truncating will be different
+    new_quantile = Zygote.ignore() do 
+        prc1 = gauss_cdf.(mean, var, a)
+        prc2 = gauss_cdf.(mean, var, b)
+        prc1 .+ quantile*(prc2 .- prc1)
+    end
+    
+    sample_gauss(mean, var, new_quantile)
+end
 
 function gauss_logpdf(x, mean, var)
     # p = gauss_pdf(x, mean, var) + 0.01
@@ -45,6 +52,8 @@ end
 function dist2(a, b)
     sum((a.-b).^2)
 end
+
+dist(a, b) = sqrt(dist2(a, b))
 
 angdiff(a, b) = posmod((a - b + π), 2π) - π
 posmod(a, n) = (a - floor(a/n) * n)
@@ -106,20 +115,7 @@ end
 
 
 # Differentiable sampling
-function dsample(v, n)
-    Zygote.ignore() do
-        if n > length(v)
-            v = repeat(v, n÷length(v) + 1)
-        end
-        StatsBase.sample(_game_rng, v, n; replace=false)
-    end
-end
 
-function _rand_idxs(l, n)
-    Zygote.ignore() do 
-        Random.shuffle(_game_rng, 1:l)[1:n]
-    end
-end
 
 function wsample(items, weights)
     weights = weights ./ sum(weights)
@@ -131,16 +127,35 @@ function wsample(items, weights)
 end
 
 function wdsample(v, w, n)
-    Zygote.ignore() do
-        # if n > length(v)
-        #     v = repeat(v, n÷length(v) + 1)
-        #     w = repeat(w, n÷length(w) + 1)
-        # end
-        StatsBase.wsample(_game_rng, v, w, n; replace=true)
+    [mapreduce(vcat, 1:n) do i
+        idx = wsample(1:length(v), w)
+        res = v[idx]
+        v = [v[begin:(idx-1)]; v[(idx+1):end]]
+        w = [w[begin:(idx-1)]; w[(idx+1):end]]
+        res
+    end...]
+end
+
+
+function dsample(v, n)
+    w = ones(length(v))
+    wdsample(v, w, n)
+end
+
+
+function default(t, i, d)
+    try
+        t[i]
+    catch
+        d
     end
 end
 
 
 function l2(v)
     sum(v'*v)
+end
+
+function randu(rng, l, u)
+    rand(rng) * (u - l) + l
 end

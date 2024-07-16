@@ -5,7 +5,7 @@ end
 
 Flux.@layer HistPolicy
 
-function make_nn_control(agent, id_input, id_output, n_input, n_output; t_max=5)
+function make_nn_control(agent, id_input, id_output, n_input, n_output; t_max=7)
 
     function control(dist, game_params)
         t = Int(dist[:t][1])
@@ -25,8 +25,9 @@ function make_nn_control(agent, id_input, id_output, n_input, n_output; t_max=5)
         out = model.subpols[t](transpose(in))'
 
         # action = tanh.(0.01 * out)
-        action = out ./ sqrt.(sum(out .^ 2, dims=2))
-        # action = 0.5 * (tanh.(0.01 * out[:, 1]) .+ 1.2) .* [cos.(out[:, 2]) sin.(out[:, 2])]
+        # action = out ./ sqrt.(sum(out .^ 2, dims=2))
+        θ = out[:, 2] 
+        action = 0.5 * (tanh.(out[:, 1]) .+ 1.2) .* [cos.(θ) sin.(θ)]
 
         alter(dist, 
             id_output => action
@@ -37,8 +38,7 @@ function make_nn_control(agent, id_input, id_output, n_input, n_output; t_max=5)
         Chain(
             Dense(n_input*t => 32),
             Dense(32 => 32, relu),
-            Dense(32 => 64, relu),
-            Dense(64 => 32, relu),
+            Dense(32 => 32, relu),
             Dense(32 => 32, relu),
             Dense(32 => n_output)
         ) for t in 1:t_max]
