@@ -3,7 +3,7 @@ struct SensingGame <: Game
     dyn_fns::Vector{Function}
 end
 
-function rollout(g::SensingGame, game_params; n=7)
+function rollout(g::SensingGame, game_params; n)
     state = g.prior_fn()
     hist = [state]
 
@@ -66,7 +66,6 @@ function make_clock_step(dt)
         t = Zygote.ignore() do 
             dist[:t] 
         end
-        # t = dist[:t] .+ dt
         alter(dist, :t => t .+ dt)
     end
     State(:t => 1), clock_step
@@ -88,8 +87,6 @@ function make_cross_step(dyn_fn, ll_fn, alter_id, info_id, n; dedupe=false)
         infosets = Zygote.ignore() do 
             unique(state_dist[info_id])
         end
-
-
 
         dists = map(infosets) do infoset
             # quantile = rand(SensingGames._game_rng, r, 2) #[randu.(SensingGames._game_rng, 0.1, 0.9) randu.(SensingGames._game_rng, 0.1, 0.9)]
@@ -132,25 +129,25 @@ function make_cross_step(dyn_fn, ll_fn, alter_id, info_id, n; dedupe=false)
             lls = ll_fn(info_dist, rep_dist)
 
             # Enforce ∑[o] P(o | S) = 1 for all S
-            lls = Float32.(lls .- log.(sum(exp.(lls), dims=2)))
+            lls = (lls .- log.(sum(exp.(lls), dims=2)))
 
             z_new = repeat(info_dist.z, outer=(r, 1))
             w_new = repeat(info_dist.w, outer=(r, 1)) 
             w_new = vec(w_new .+ reshape(lls, (:)))
-            info_new = Float32.([infoset_num:(infoset_num+r-1)...])
+            info_new = ([infoset_num:(infoset_num+r-1)...])
             info_new = repeat(info_new, inner=(m, 1))
-            
+
             split_dist = alter(StateDist(z_new, w_new, state_dist.ids, state_dist.map),
                 alter_id => repeat(rep_dist[alter_id], inner=(m, 1)),
-                info_id => info_new
+                info_id => Float64.(info_new)
             )
             infoset_num += r
 
             out_weight = sum(exp.(split_dist.w))
-
+            
             Zygote.ignore() do 
                 if ! (out_weight ≈ in_weight)
-                    @warn "Change of branch weight: $out_weight != $in_weight in infoset $info_id=$infoset"
+                    @warn "Change of branch weight: $in_weight != $out_weight in infoset $info_id=$infoset"
                 end
             end
 

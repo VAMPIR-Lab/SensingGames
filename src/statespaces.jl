@@ -4,76 +4,76 @@
 #   knowing that `state` is basically a 1D vector but not caring about where
 #   its components actually live.
 # They're also helpful because Zygote doesn't permit array mutation:
-#   States are "immutable" (you actually can mutate them, but you shouldn't);
+#   States are immutable
 #   you can use `alter` to get a new State from an old one and a list of substitutions.
 
+using Base: ImmutableDict
+
 struct State
-    z::Vector{Float32}
+    z::Vector{Float64}
     ids::Vector{Symbol}
-    map::Dict{Symbol, UnitRange{Int}}
+    map::ImmutableDict{Symbol, UnitRange{Int}}
 end
 
 function State(semantics::Pair{Symbol, Int}...)
+    end_ids = cumsum([s[2] for s in semantics])
+    start_ids = [1; end_ids[begin:end-1] .+ 1]
 
-    idx = 1
+    # q = map(1:length(semantics)) do i
+    #     semantics[i][1] => start_ids[i]:end_ids[i]
+    # end
 
-    ids = [map(semantics) do (id, _)
-        id
-    end...]
+    k = [s for (s, _) in semantics]
 
-    lens = Dict(semantics...)
+    merge(dict, i) = begin
+        ImmutableDict{Symbol, UnitRange{Int}}(dict, 
+            semantics[i][1], start_ids[i]:end_ids[i])
+    end
 
-    m = Dict(map(ids) do (id)
-        l = idx
-        u = (idx += lens[id])
-        id => l:(u-1)
-    end...)
+    m = foldl(merge, 1:length(semantics), init=ImmutableDict{Symbol, UnitRange{Int}}()) 
 
     State(
-        zeros(idx-1),
-        ids,
+        zeros(end_ids[end]),
+        k,
         m
     )
 end
 
+
 function Vector{State}(z, semantics::Pair{Symbol, Int}...)
+    end_ids = cumsum([s[2] for s in semantics])
+    start_ids = [1; end_ids[begin:end-1] .+ 1]
 
-    idx = 1
+    k = [s for (s, _) in semantics]
 
-    ids = [map(semantics) do (id, _)
-        id
-    end...]
+    merge(dict, i) = begin
+        ImmutableDict{Symbol, UnitRange{Int}}(dict, 
+            semantics[i][1], start_ids[i]:end_ids[i])
+    end
 
-    lens = Dict(semantics...)
+    m = foldl(merge, 1:length(semantics), init=ImmutableDict{Symbol, UnitRange{Int}}()) 
 
-    m = Dict(map(ids) do (id)
-        l = idx
-        u = (idx += lens[id])
-        id => l:(u-1)
-    end...)
-
-    Z = reshape(z, (idx-1, :))'
+    Z = reshape(z, (end_ids[end], :))'
     [State(
         Z[i, :],
-        ids,
+        k,
         m
     ) for i in 1:size(Z)[1]]
-
 end
 
 function Base.size(s::State)
     Base.size(s.z)
 end
 
-function Base.getindex(s::State, i::Int)::Vector{Float32}
+function Base.getindex(s::State, i::Int)::Vector{Float64}
     s.z[i]
 end
 
-function Base.getindex(s::State, q::Symbol)::Vector{Float32}
+function Base.getindex(s::State, q::Symbol)::Vector{Float64}
     s.z[s.map[q]]
 end
 
-function Base.getindex(s::State, I::Vararg{Int})::Vector{Float32}
+function Base.getindex(s::State, I::Vararg{Int})::Vector{Float64}
     s.z[I...]
 end
 
@@ -87,24 +87,11 @@ function Base.length(s::State)
     length(s.z)
 end
 
-function alter(state::State, substitutions::Pair{Symbol, Vector{Float32}}...)::State
-    dict = Dict(substitutions...)
-    z::Vector{Float32} = mapreduce(vcat, state.ids) do id::Symbol
-        if id in keys(dict)
-            Float32.(dict[id])
-        else
-            state[id]
-        end
-    end
-
-    State(z, state.ids, state.map)
-end
-
 function alter(state::State, substitutions::Pair{Symbol, Vector{Float64}}...)::State
     dict = Dict(substitutions...)
-    z::Vector{Float32} = mapreduce(vcat, state.ids) do id::Symbol
+    z::Vector{Float64} = mapreduce(vcat, state.ids) do id::Symbol
         if id in keys(dict)
-            Float32.(dict[id])
+            dict[id]
         else
             state[id]
         end
@@ -114,25 +101,26 @@ function alter(state::State, substitutions::Pair{Symbol, Vector{Float64}}...)::S
 end
 
 function merge(states::State...)
+    
     z = mapreduce(s -> s.z, vcat, states)
+    ids = mapreduce(s -> s.ids, vcat, states)
 
     n = 0
-    map = Dict(mapreduce(vcat, states) do s
+    map = ImmutableDict(mapreduce(vcat, states) do s
         t = n
         n += length(s.z)
         [id => loc.+t for (id, loc) in s.map]
     end...)
 
-    ids = mapreduce(s -> s.ids, vcat, states)
     State(z, ids, map)
 end
 
 
 struct StateDist
-    z::Matrix{Float32}
-    w::Vector{Float32}
+    z::Matrix{Float64}
+    w::Vector{Float64}
     ids::Vector{Symbol}
-    map::Dict{Symbol, UnitRange{Int}}
+    map::ImmutableDict{Symbol, UnitRange{Int}}
 end
 
 function StateDist(state::State, n::Int64)
@@ -162,7 +150,7 @@ function Base.getindex(s::StateDist, i::Union{Int, Colon, UnitRange{Int}})
     State(s.z[i, :], s.ids, s.map)
 end
 
-function Base.getindex(s::StateDist, q::Symbol)::Matrix{Float32}
+function Base.getindex(s::StateDist, q::Symbol)::Matrix{Float64}
     s.z[:, s.map[q]]
 end
 
@@ -180,37 +168,24 @@ function expectation(f, s::StateDist)
     sum(1:length(s)) do i
         c = f(s[i])
         p = exp(s.w[i])
-        # @show p
         p * c
     end
 end
 
-function alter(state::StateDist, substitutions...)::StateDist
-    dict = Dict(substitutions...)
-    z::Matrix{Float32} = mapreduce(hcat, state.ids) do id::Symbol
-        if id in keys(dict)
-            Zygote.@ignore() do
-                if size(dict[id]) != size(state[id])
-                    throw(DimensionMismatch("Can't set state dist component $id of\
-                     size $(size(state[id])) to value of size $(size(dict[id]))"))
-                end
-            end
-            Float32.(dict[id])
-        else
-            state[id]
-        end
+function alter(state::StateDist, substitutions::Pair{Symbol, Matrix{Float64}}...)::StateDist
+    
+    z_buf = Zygote.Buffer(state.z)
+    z_buf[:, :] = state.z
+
+    for (id, v) in substitutions
+        z_buf[:, state.map[id]] = v
     end
 
-    StateDist(z, state.w, state.ids, state.map)
-end
-
-function reweight(state::StateDist, w)
-    w_new = state.w .+ vec(w)
-    StateDist(state.z, w_new, state.ids, state.map)
+    StateDist(copy(z_buf), state.w, state.ids, state.map)
 end
 
 function draw(dist::StateDist; n=1, as_dist=true)
-    # Zygote.ignore() do
+    Zygote.ignore() do
         # idxs = wdsample(1:length(dist), exp.(dist.w), n)
         # idxs = dsample(1:length(dist), n)
         # idxs = rand(1:length(dist), n)
@@ -224,7 +199,16 @@ function draw(dist::StateDist; n=1, as_dist=true)
                 State(dist.z[i, :], dist.ids, dist.map)
             end
         end
-    # end
+    end
+end
+
+function Base.copy(dist::StateDist)
+    StateDist(
+        copy(dist.z),
+        copy(dist.w),
+        dist.ids,
+        dist.map
+    )
 end
 
 
@@ -240,10 +224,12 @@ function debranch_history(hist)
         n = h ÷ length(dist)
         z_new = repeat(dist.z, n)
         w_new = repeat(dist.w, n)
-        StateDist(z_new, w_new, dist.ids, dist.map)
+        StateDist(z_new, w_new, state.ids, dist.map)
     end
 end
 
-Zygote.@adjoint State(semantics...) = State(semantics...), p -> (nothing)
+Zygote.@adjoint State(semantics...) = State(semantics...), _ -> (nothing)
 Zygote.@adjoint State(z::AbstractVector, ids, map) = State(z, ids, map), p -> (p.z, nothing, nothing)
-Zygote.@adjoint StateDist(z::Matrix{Float32}, ids, map) = StateDist(z, ids, map), p -> (p.z, nothing, nothing)
+Zygote.@adjoint StateDist(z::Matrix{Float64}, map) = StateDist(z, map), p -> (p.z, nothing)
+
+

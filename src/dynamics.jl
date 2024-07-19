@@ -13,14 +13,15 @@ function make_vel_dynamics(agent::Symbol; dt=1.0, dims=2, control_scale=1.0)
         id_vel => dims
     )
 
-    function dyn!(state::StateDist, game_params)
+    function vel_dyn(state::StateDist, game_params)
         pos = state[id_pos] + dt*state[id_vel]*control_scale
-        alter(state,
+        q = alter(state,
             id_pos => pos
         )
+        q
     end
     
-    state, dyn!
+    state, vel_dyn
 end
 
 # Planar acceleration integrator
@@ -35,18 +36,18 @@ function make_acc_dynamics(agent::Symbol; dt=1.0, dims=2, drag=0.0, control_scal
         id_acc => dims
     )
 
-    function dyn!(state::StateDist, game_params)
+    function acc_dyn(state::StateDist, game_params)
         acc = state[id_acc] .* control_scale
         vel = state[id_vel] .+ acc*dt
         pos = state[id_pos] .+ state[id_vel] .+ 0.5.*acc*dt.^2
 
         alter(state, 
-            id_pos => Float32.(pos),
-            id_vel => Float32.(vel)
+            id_pos => pos,
+            id_vel => vel
         )
     end
     
-    state, dyn!
+    state, acc_dyn
 end
 
 # Unicycle dynamics
@@ -61,7 +62,7 @@ function make_unicycle_dynamics(agent::Symbol; dt=1.0)
         id_u => 2
     )
 
-    function dyn!(state::StateDist, game_params)
+    function unicycle_dyn(state::StateDist, game_params)
         v = 0.1 
         # θ = game_params.dθ
         # dθ = 0
@@ -85,7 +86,7 @@ function make_unicycle_dynamics(agent::Symbol; dt=1.0)
         )
     end
     
-    state, dyn!
+    state, unicycle_dyn
 end
 
 # Bound dynamics: Gently bounces players off a given bound
@@ -94,11 +95,11 @@ end
 #   set slightly outside of the actual constraint
 function make_bound_dynamics(id, lower, upper; ω=1.0)
 
-    function dyn!(state::StateDist, history, gp)
+    function bound_dyn(state::StateDist, gp)
         alter(state,
-            id => Float32.(softclamp.(state[id], lower + ω*rand(), upper + ω*rand()))
+            id => softclamp.(state[id], lower + ω*rand(), upper + ω*rand())
         )
     end
 
-    nothing, dyn!
+    nothing, bound_dyn
 end

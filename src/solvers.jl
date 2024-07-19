@@ -10,7 +10,7 @@ function solve(callback, game::SensingGame, game_params, cost_fns, options)
 
     flux_setups = (;
         p1 = Flux.setup(Adam(1e-3), game_params[:p1]),
-        p2 = Flux.setup(Adam(3e-5), game_params[:p2]),
+        p2 = Flux.setup(Adam(1e-4), game_params[:p2]),
     )
 
     for t in 1:options.n_iters
@@ -23,8 +23,13 @@ function solve(callback, game::SensingGame, game_params, cost_fns, options)
         end
 
         reseed!(seed + t ÷ options.steps_per_seed)
-        callback(game_params)
+        if callback(game_params)
+            println("DONE ==============")
+            return game_params
+        end
     end
+
+    return game_params
 end
 
 # TODO: This is very sloppy

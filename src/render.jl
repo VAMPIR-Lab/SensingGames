@@ -137,12 +137,12 @@ function render_points(renderer::MakieRenderer, states, id, context)
     t = string.(1:length(states[]))
 
     color = default(context, :color_primary, :grey)
-    alpha = default(context, :weight, 1.0) * 0.5
+    alpha = default(context, :weight, 1.0) * 0.2
     ax = context.ax
 
     scatter!(ax, pairs; color, alpha, markersize=20, marker='o')
-    text_pairs = @lift($pairs .- [1 1.6])
-    text!(ax, text_pairs , text=t, fontsize=8)
+    text_pairs = @lift($pairs .- [1; 1.6])
+    text!(ax, text_pairs; alpha, text=t, fontsize=8)
 
     for i in 1:length(states[])
         raw = @lift($raw_pairs[:, i])
