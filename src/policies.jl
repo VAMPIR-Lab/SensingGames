@@ -5,115 +5,41 @@ end
 
 Flux.@layer HistPolicy
 
-function make_nn_control(agent, id_input, id_output, n_input, n_output; t_max=7)
-
+function make_nn_control(agent, id_input, id_output; t_max=7)
     function control(dist, game_params)
         t = Int(dist[:t][1])
-        T = min(t, t_max)
+        # T = min(t, t_max)
         history = dist[id_input]
 
         model = game_params[agent]
 
-        # out = sum(1:T) do t
-        #     in = history[:, (1:n_input) .+ n_input*(t-1)]
-        #     model.subpols[t](transpose(in))'
-        # end
-        in = history[:, begin:(T*n_input)]
-        out = model.subpols[T](transpose(in))'
+        in = history
+        @show size(history)
+        out = model.subpols[1](transpose(in))'
 
-        # action = tanh.(0.01 * out)
-        # action = out ./ sqrt.(sum(out .^ 2, dims=2))
-        θ = out[:, 2] 
-        action = 0.5 * (tanh.(out[:, 1]) .+ 1.2) .* [cos.(θ) sin.(θ)]
+        # TODO - Assume for now that we always use our max speed of 1
+        action = out ./ sqrt.(sum(out .^ 2, dims=2))
 
         alter(dist, 
             id_output => action
         )
     end
+end
 
-    models = HistPolicy([
+function make_policy(n_input, n_output; t_max=7)
+    HistPolicy([
         f64(Chain(
             Dense(n_input*t => 32, relu),
-            Dense(32 => 32, tanh),
-            Dense(32 => 32, relu),
+            Dense(32 => 64, relu),
+            Dense(64 => 64, relu),
+            Dense(64 => 32, relu),
             Dense(32 => n_output)
         )) for t in 1:t_max]
     )
-    models, control
 end
 
 
 
-function make_weighted_control(agent, id_input, id_output, n_input, n_output; t_max=7)
-    info_id = Symbol(agent, "_info")
-
-    br_models = HistPolicy([
-        Chain(
-            Dense(n_input => 32, relu),
-            Dense(32 => 32, relu),
-            Dense(32 => 32, relu),
-            Dense(32 => n_output)
-        )]
-    )
-
-    merge_model = HistPolicy([
-        Chain(
-            Dense(n_input => 32, relu),
-            Dense(32 => 64, relu),
-            Dense(64 => 32, relu),
-            Dense(32 => n_output)
-        )]
-    )
-
-    function control(state_dist, game_params)
-        t = Int(state_dist[:t][1])
-        T = min(t, t_max)
-        
-        infosets = Zygote.ignore() do 
-            unique(state_dist[info_id])
-        end
-
-        dists = mapreduce(vcat, infosets) do infoset
-            rows = vec(state_dist[info_id] .== infoset)
-
-            info_dist = StateDist(
-                state_dist.z[rows, :],
-                state_dist.w[rows],
-                state_dist.ids,
-                state_dist.map
-            )
-
-            # br_input = transpose()
-            # best_responses = game_params[agent].br.subpols[1](br_input)
-            total_weight = sum(exp.(info_dist.w))
-
-            input = expectation(info_dist) do state
-                state[id_input]
-            end / total_weight
-
-            # merge_input = [d; w]
-
-            out = game_params[agent].merge.subpols[1](input)'
-            # out = best_responses[:, 1]'
-
-            θ = out[:, 2] 
-            action = 0.5 * (tanh.(out[:, 1]) .+ 1.2) .* [cos.(θ) sin.(θ)]
-
-            alter(info_dist,
-                id_output => repeat(action, length(info_dist))
-            )
-        end
-
-        StateDist(
-            vcat([dist.z for dist in dists]...),
-            vcat([dist.w for dist in dists]...),
-            dists[begin].ids,
-            dists[begin].map
-        )
-    end
-
-    (; br=br_models, merge=merge_model), control
-end
 
 
 # Idea: Map [obs] -> [(true state, prob)...]
@@ -134,32 +60,41 @@ end
 
 
 
-function make_belief_step(agent, true_id, m)
+function make_belief_step(agent, true_id, m; consistent=true)
     info_id = Symbol(agent, "_info")
     belief_id = Symbol(agent, "_blf")
 
     function belief_step(state_dist, game_params)
-        infosets = Zygote.ignore() do 
-            unique(state_dist[info_id])
+        
+        
+        partitions = if consistent 
+            Zygote.ignore() do 
+                map(unique(state_dist[info_id])) do infoset
+                    vec(state_dist[info_id] .== infoset)
+                end
+            end
+        else
+            [[i] for i in 1:length(state_dist)]
         end
 
-        dists = mapreduce(vcat, infosets) do infoset
-            rows = vec(state_dist[info_id] .== infoset)
+        dists = mapreduce(vcat, partitions) do partition
 
             info_dist = StateDist(
-                state_dist.z[rows, :],
-                state_dist.w[rows],
+                state_dist.z[partition, :],
+                state_dist.w[partition],
                 state_dist.ids,
                 state_dist.map
             )
-            total_weight = sum(exp.(info_dist.w))
 
-            belief = expectation(info_dist) do state
-                state[true_id]
-            end / total_weight
+            weight = exp.(info_dist.w) ./ sum(exp.(info_dist.w))
+
+            belief = sum(info_dist[true_id] .*  weight, dims=1)
+
+            # belief = vec(info_dist[true_id])
+
 
             alter(info_dist,
-                belief_id => repeat(belief', length(info_dist))
+                belief_id => repeat(belief, length(info_dist))
             )
         end
 

@@ -67,8 +67,8 @@ function render_localization(hists)
 end
 
 function test_localization()
-    state1, sdyn1 = make_acc_dynamics(:p1; control_scale=1)
-    state2, sdyn2 = make_acc_dynamics(:p2; control_scale=1)
+    state1, sdyn1 = make_acc_dynamics_step(:p1; control_scale=1)
+    state2, sdyn2 = make_acc_dynamics_step(:p2; control_scale=1)
 
     # Observations happen simultaneously
     obs1, odyn1 = make_localization_sensing(:p1, 0.0, [2; 2; 1; 1; 1])

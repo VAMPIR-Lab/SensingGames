@@ -1,3 +1,5 @@
+using LinearAlgebra
+
 struct SensingGame <: Game
     prior_fn::Function
     dyn_fns::Vector{Function}
@@ -7,11 +9,13 @@ function rollout(g::SensingGame, game_params; n)
     state = g.prior_fn()
     hist = [state]
 
-    for _ in 1:n
+
+    for t in 1:n
         for dyn_fn in g.dyn_fns
             state = dyn_fn(state, game_params)
         end
         hist = [hist; state]
+
     end
     
     hist
@@ -43,22 +47,15 @@ end
 #   writing steps. The performance impact is small but insidious.
 
 
-function make_hist_step(id_hist, ids, m, t_max)
-
+function make_hist_step(id_hist, id_store, t_max)
     function hist_step(dist, params)
-        hist = [dist[ids] dist[id_hist]][:, begin:(m*t_max)]
+        m = size(dist[id_store])[2]
+        hist = [dist[id_store] dist[id_hist]][:, begin:(m*t_max)]
         
         alter(dist,
             id_hist => hist
         )
     end
-
-    s = State(id_hist => m*t_max)
-    s = alter(s, 
-        id_hist => s[id_hist] .+ 0
-    )
-    
-    s, hist_step
 end
 
 function make_clock_step(dt)
@@ -68,102 +65,74 @@ function make_clock_step(dt)
         end
         alter(dist, :t => t .+ dt)
     end
-    State(:t => 1), clock_step
 end
 
-function make_cross_step(dyn_fn, ll_fn, alter_id, info_id, n; dedupe=false)
+function make_cross_step(dyn_fn, ll_fn, n, alter_ids)
 
-    num_reps = ((n isa AbstractVector) ? (t) -> n[t] : (t) -> n) 
-
-    infoset_num = 1
+    num_counterfactuals = ((n isa AbstractVector) ? (t) -> n[t] : (t) -> n) 
     function cross_step(state_dist, game_params)
 
-        t = Int(state_dist[:t][1]) 
-        if t == 1
-            infoset_num = 1
-        end
-        r = num_reps(t)
+        t = Int(state_dist[:t][1])
+        r = num_counterfactuals(t)
+        N = length(state_dist)
         
-        infosets = Zygote.ignore() do 
-            unique(state_dist[info_id])
+        quantile = rand(SensingGames._game_rng, N, 2) 
+
+        new_state_dist = dyn_fn(state_dist, game_params, quantile)
+        if r <= 0
+            return new_state_dist
         end
 
-        dists = map(infosets) do infoset
-            # quantile = rand(SensingGames._game_rng, r, 2) #[randu.(SensingGames._game_rng, 0.1, 0.9) randu.(SensingGames._game_rng, 0.1, 0.9)]
-            quantile = -1
-            rows = vec(state_dist[info_id] .== infoset)
+        lls_n = ll_fn(state_dist, new_state_dist)
+        lls_n_norm = sum(exp.(lls_n), dims=2)    
 
-            info_dist = StateDist(
-                state_dist.z[rows, :],
-                state_dist.w[rows],
-                state_dist.ids,
-                state_dist.map
-            )
-
-            in_weight = sum(exp.(info_dist.w))
-
-            m = length(info_dist)
+        # confusion_matrix = (lls_n .- log.(lls_n_norm) )
+        # confusion_matrix = confusion_matrix .+ info_dist.w
+        # confusion_matrix = exp.(confusion_matrix)
+        # confusion_matrix = (.! I(N)) .* confusion_matrix
 
 
-            # It's possible to get duplicate outputs; dedupe those if desired
-            rep_dist = if dedupe
-                # Zygote.ignore() do
-                    out_dist = dyn_fn(info_dist, game_params, quantile)
-                    unique_idxs = Zygote.ignore() do
-                        unique(i -> out_dist[i][alter_id], 1:length(out_dist))
-                    end
+        confusion_entries = Zygote.ignore() do
+            rand([Iterators.product(1:N, 1:N)...], r)
+        end
+        ground_entries = [(i, i) for i in 1:N]
+        all_entries = [ground_entries; confusion_entries]
 
-                    deduped_out_dist = StateDist(
-                        out_dist.z[unique_idxs, :],
-                        out_dist.w[unique_idxs],
-                        out_dist.ids,
-                        out_dist.map
-                    )
-                    draw(deduped_out_dist, n=r)
-                # end
-            else
-                pre_dist = draw(info_dist, n=r)
-                dyn_fn(pre_dist, game_params, quantile)
-            end
 
-            lls = ll_fn(info_dist, rep_dist)
+        confusion_mask_buffer = Zygote.bufferfrom(fill(false, (N, N)))
+        for entry in confusion_entries
+            confusion_mask_buffer[entry...] = true
+        end
+        confusion_mask = copy(confusion_mask_buffer)
+        ground_mask = I(N)
+        all_mask = confusion_mask .|| ground_mask
+        
 
-            # Enforce ∑[o] P(o | S) = 1 for all S
-            lls = (lls .- log.(sum(exp.(lls), dims=2)))
+        liks = exp.(lls_n)
+        new_liks = all_mask .* (liks)
+        liks_norm = sum(new_liks, dims=2) 
+        new_liks_normed = new_liks ./ liks_norm
+        new_liks_marg = new_liks_normed .* exp.(state_dist.w)
+        new_liks_masked = all_mask .* (new_liks_marg)
 
-            z_new = repeat(info_dist.z, outer=(r, 1))
-            w_new = repeat(info_dist.w, outer=(r, 1)) 
-            w_new = vec(w_new .+ reshape(lls, (:)))
-            info_new = ([infoset_num:(infoset_num+r-1)...])
-            info_new = repeat(info_new, inner=(m, 1))
-
-            split_dist = alter(StateDist(z_new, w_new, state_dist.ids, state_dist.map),
-                alter_id => repeat(rep_dist[alter_id], inner=(m, 1)),
-                info_id => Float64.(info_new)
-            )
-            infoset_num += r
-
-            out_weight = sum(exp.(split_dist.w))
-            
-            Zygote.ignore() do 
-                if ! (out_weight ≈ in_weight)
-                    @warn "Change of branch weight: $in_weight != $out_weight in infoset $info_id=$infoset"
-                end
-            end
-
-            split_dist
+        new_w = map(all_entries) do entry
+            log(new_liks_masked[entry...])
         end
 
-        res = StateDist(
-            vcat([dist.z for dist in dists]...),
-            vcat([dist.w for dist in dists]...),
-            dists[begin].ids,
-            dists[begin].map
+        ground_rows = [a for (a, b) in all_entries]
+        confusion_rows = [b for (a, b) in all_entries]
+
+        dist = StateDist(
+            state_dist.z[ground_rows, :],
+            new_w,
+            state_dist.ids,
+            state_dist.map
         )
-        res
-    end
 
-    State(info_id => 1), cross_step
+        alterations = [id => new_state_dist[id][confusion_rows, :] for id in alter_ids]
+
+        alter(dist, alterations...)
+    end
 end
 
 
@@ -171,6 +140,7 @@ end
 # function make_prune_step(n)
 #     function prune_step(state_dist, game_params)
 #         idxs = Zygote.ignore() do 
+            # @show exp.(lls)
 #             sortperm(-state_dist.w)
 #         end
 

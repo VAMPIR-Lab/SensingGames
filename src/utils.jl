@@ -1,5 +1,6 @@
 
 
+
 # Sampling from Gaussian distributions
 #   We need a closed-ish form of the CDF so that Zygote can
 #   differentiate through it (sadly Distributions.jl does not
@@ -25,17 +26,24 @@ function sample_gauss(mean, var, quantile)
     inverse_gauss_cdf(mean, var, quantile)
 end
 
-function sample_trunc_gauss(mean, var, a, b, quantile)
+function sample_trunc_gauss(mean, var, quantile; a=-50, b=50)
     # Note that mean and variance correspond to the original
     #   distribution (before truncating) - the 
     #   moments after truncating will be different
-    new_quantile = Zygote.ignore() do 
-        prc1 = gauss_cdf.(mean, var, a)
-        prc2 = gauss_cdf.(mean, var, b)
-        prc1 .+ quantile*(prc2 .- prc1)
-    end
-    
+    # new_quantile = Zygote.ignore() do
+
+    @show new_quantile
     sample_gauss(mean, var, new_quantile)
+end
+
+sample_trunc_gauss(mean, var; a=-50, b=50) = sample_trunc_gauss(mean, var, rand(SensingGames._game_rng); a, b)
+
+
+function trunc_gauss_pdf(x, mean, var, a, b)
+    i0 = gauss_cdf(mean, var, a)
+    i1 = gauss_cdf(mean, var, b)
+    @show i0
+    gauss_pdf(x, mean, var) / (i1 - i0)
 end
 
 function gauss_logpdf(x, mean, var)
@@ -61,9 +69,9 @@ posmod(a, n) = (a - floor(a/n) * n)
 
 # Some soft functions for differentiability purposes
 #   Be careful - make sure using these makes sense theoretically
-function softif(x, a, b; hardness=1)
+function softif(x, value_if_positive, value_if_negative; hardness=1)
     q = 1 / (1 + exp(-hardness * x))
-    q * a + (1-q)*b
+    q * value_if_positive + (1-q)*value_if_negative
 end
 
 function softclamp(x, a, b)
@@ -80,7 +88,7 @@ function penalty(x)
     if x > 0
         return 0
     else
-        return x^6
+        return x^4
     end
 end
 
@@ -127,6 +135,9 @@ function wsample(items, weights)
 end
 
 function wdsample(v, w, n)
+    v = repeat(v, n ÷ length(v) + 1)
+    w = repeat(w, n ÷ length(w) + 1)
+
     [mapreduce(vcat, 1:n) do i
         idx = wsample(1:length(v), w)
         res = v[idx]

@@ -184,22 +184,25 @@ function alter(state::StateDist, substitutions::Pair{Symbol, Matrix{Float64}}...
     StateDist(copy(z_buf), state.w, state.ids, state.map)
 end
 
-function draw(dist::StateDist; n=1, as_dist=true)
-    Zygote.ignore() do
-        # idxs = wdsample(1:length(dist), exp.(dist.w), n)
+function draw(dist::StateDist; n=1, as_dist=true, reweight=true)
+    # Zygote.ignore() do
+        idxs = wdsample(1:length(dist), exp.(dist.w), n)
         # idxs = dsample(1:length(dist), n)
         # idxs = rand(1:length(dist), n)
-        idxs = repeat(1:length(dist), n ÷ length(dist) + 1)[1:n]
+        # idxs = repeat(1:length(dist), n ÷ length(dist) + 1)[1:n]
         if as_dist
-            # w = 
-            # w = log.(exp.(w) ./ sum(exp.(w)))
-            StateDist(dist.z[idxs, :], dist.w[idxs], dist.ids, dist.map)
+            w = if reweight
+                log.(exp.(dist.w[idxs]) ./ sum(exp.(dist.w[idxs])))
+            else
+                dist.w[idxs]
+            end
+            StateDist(dist.z[idxs, :], w, dist.ids, dist.map)
         else
             map(idxs) do i
                 State(dist.z[i, :], dist.ids, dist.map)
             end
         end
-    end
+    # end
 end
 
 function Base.copy(dist::StateDist)
@@ -211,6 +214,26 @@ function Base.copy(dist::StateDist)
     )
 end
 
+function Base.show(io::IO, ::MIME"text/plain", s::State)
+    if isempty(s.ids)
+        print(io, "Empty State")
+        return
+    end
+
+    str = "State\n" * mapreduce(*, s.ids) do id
+        n_spaces = 10 - length(string(id))
+
+        label = "| " * string(id) * repeat(" ", n_spaces) * "| " 
+        
+        data = mapreduce(*, enumerate(s[id])) do (i, v)
+            @sprintf("%.3f", v) * ((i%10==0) ? "\n|           | " : "\t")
+        end * "\n"
+
+        label * data
+    end
+
+    print(io, str)
+end
 
 
 # When state spaces get more particles 

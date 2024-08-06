@@ -50,12 +50,9 @@ function render_dist(f, renderer::MakieRenderer, state_dist::StateDist; kargs...
 
             f((@lift($(renderer.state_dist)[i]), context))
 
-            info_1 = @lift(Int($(renderer.state_dist)[i][:p1_info][]))
-            info_2 = @lift(Int($(renderer.state_dist)[i][:p2_info][]))
-
             weight_string = @lift(@sprintf("%.2f", $weight*100))
             label = @lift(
-                "Reality #($($info_1), $($info_2))" * 
+                "Reality #$i" * 
                 # string(i) * 
                 ": " * 
                 $weight_string * 

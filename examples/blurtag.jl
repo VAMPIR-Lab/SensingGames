@@ -103,11 +103,11 @@ function test_blurtag()
     hist1, shist1 = make_hist_step(:p1, [:p1_pos; :p1_obs], 4, 5)
     hist2, shist2 = make_hist_step(:p2, [:p2_pos; :p2_obs], 4, 5)
 
-    state1, sdyn1 = make_acc_dynamics(:p1; control_scale=8)
-    state2, sdyn2 = make_acc_dynamics(:p2; control_scale=0.5)
+    state1, sdyn1 = make_acc_dynamics_step(:p1; control_scale=8)
+    state2, sdyn2 = make_acc_dynamics_step(:p2; control_scale=0.5)
 
-    _, bdyn1 = make_bound_dynamics(:p1_pos, -22, 22)
-    _, bdyn2 = make_bound_dynamics(:p2_pos, -22, 22)
+    _, bdyn1 = make_bound_step(:p1_pos, -22, 22)
+    _, bdyn2 = make_bound_step(:p2_pos, -22, 22)
 
     obs1, odyn1 = make_blurtag_sensing(:p1, :p2; blur_coef=20.0, n=[1; 8; 1; 1; 1])
     obs2, odyn2 = make_blurtag_sensing(:p2, :p1; blur_coef=20.0, n=[1; 1; 1; 1; 1])
