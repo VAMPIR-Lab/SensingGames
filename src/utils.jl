@@ -1,6 +1,5 @@
 
 
-
 # Sampling from Gaussian distributions
 #   We need a closed-ish form of the CDF so that Zygote can
 #   differentiate through it (sadly Distributions.jl does not
@@ -21,40 +20,35 @@ function sample_gauss(mean, var)
     inverse_gauss_cdf(mean, var, rand(rng))
 end
 
-
 function sample_gauss(mean, var, quantile)
     inverse_gauss_cdf(mean, var, quantile)
 end
 
-function sample_trunc_gauss(mean, var, quantile; a=-50, b=50)
-    # Note that mean and variance correspond to the original
-    #   distribution (before truncating) - the 
-    #   moments after truncating will be different
-    # new_quantile = Zygote.ignore() do
-
-    @show new_quantile
-    sample_gauss(mean, var, new_quantile)
-end
-
-sample_trunc_gauss(mean, var; a=-50, b=50) = sample_trunc_gauss(mean, var, rand(SensingGames._game_rng); a, b)
-
-
-function trunc_gauss_pdf(x, mean, var, a, b)
-    i0 = gauss_cdf(mean, var, a)
-    i1 = gauss_cdf(mean, var, b)
-    @show i0
-    gauss_pdf(x, mean, var) / (i1 - i0)
-end
-
 function gauss_logpdf(x, mean, var)
-    # p = gauss_pdf(x, mean, var) + 0.01
-    # log(p)
     -0.5 * (x-mean)^2 / var - log(2π * var)/2
 end
 
 function gauss_pdf(x, mean, var)
     exp(-0.5 *(x-mean)^2/var) / sqrt(2π*var)
 end
+
+
+function sample_trimmed_gauss(μ, σ2, quantile; l, u, σ_trim=5)
+    new_quantile = if σ2 > σ_trim^2
+        prc1 = gauss_cdf.(μ, σ2, l)
+        prc2 = gauss_cdf.(μ, σ2, u)
+        prc1 .+ quantile.*(prc2 .- prc1)
+    else
+        quantile
+    end
+    sample_gauss(μ, σ2, new_quantile)
+end
+
+function sample_trimmed_gauss(μ, σ2; l, u)
+    sample_trimmed_gauss(μ, σ2, rand(); l, u)
+end
+
+
 
 # Very basic geometry stuff
 function dist2(a, b)
@@ -64,7 +58,7 @@ end
 dist(a, b) = sqrt(dist2(a, b))
 
 angdiff(a, b) = posmod((a - b + π), 2π) - π
-posmod(a, n) = (a - floor(a/n) * n)
+posmod(a, n) = (a - floor.(a/n) * n)
 
 
 # Some soft functions for differentiability purposes
@@ -86,7 +80,7 @@ end
 
 function penalty(x)
     if x > 0
-        return 0
+        return -0.001x
     else
         return x^4
     end

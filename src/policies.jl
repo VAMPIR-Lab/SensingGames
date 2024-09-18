@@ -14,16 +14,18 @@ function make_nn_control(agent, id_input, id_output; t_max=7)
         model = game_params[agent]
 
         in = history
-        @show size(history)
         out = model.subpols[1](transpose(in))'
 
-        # TODO - Assume for now that we always use our max speed of 1
-        action = out ./ sqrt.(sum(out .^ 2, dims=2))
+        action = out[:, 1:2]
+        scale = tanh.(out[:, 3])
+        scaled_action = scale .* action ./ sqrt.(sum(action .^ 2, dims=2))
 
         alter(dist, 
-            id_output => action
+            id_output => scaled_action
         )
     end
+
+    GameComponent(control, [id_output])
 end
 
 function make_policy(n_input, n_output; t_max=7)

@@ -7,6 +7,7 @@
 #   States are immutable
 #   you can use `alter` to get a new State from an old one and a list of substitutions.
 
+using StatsBase
 using Base: ImmutableDict
 
 struct State
@@ -19,46 +20,23 @@ function State(semantics::Pair{Symbol, Int}...)
     end_ids = cumsum([s[2] for s in semantics])
     start_ids = [1; end_ids[begin:end-1] .+ 1]
 
-    # q = map(1:length(semantics)) do i
-    #     semantics[i][1] => start_ids[i]:end_ids[i]
-    # end
-
-    k = [s for (s, _) in semantics]
+    ids = [s for (s, _) in semantics]
 
     merge(dict, i) = begin
         ImmutableDict{Symbol, UnitRange{Int}}(dict, 
             semantics[i][1], start_ids[i]:end_ids[i])
     end
 
-    m = foldl(merge, 1:length(semantics), init=ImmutableDict{Symbol, UnitRange{Int}}()) 
+    map = foldl(merge, 1:length(semantics), init=ImmutableDict{Symbol, UnitRange{Int}}()) 
 
-    State(
-        zeros(end_ids[end]),
-        k,
-        m
-    )
+    State(zeros(end_ids[end]), ids, map)
 end
 
+function State(init_pairs::Pair{Symbol, Vector{Float64}}...)
 
-function Vector{State}(z, semantics::Pair{Symbol, Int}...)
-    end_ids = cumsum([s[2] for s in semantics])
-    start_ids = [1; end_ids[begin:end-1] .+ 1]
-
-    k = [s for (s, _) in semantics]
-
-    merge(dict, i) = begin
-        ImmutableDict{Symbol, UnitRange{Int}}(dict, 
-            semantics[i][1], start_ids[i]:end_ids[i])
-    end
-
-    m = foldl(merge, 1:length(semantics), init=ImmutableDict{Symbol, UnitRange{Int}}()) 
-
-    Z = reshape(z, (end_ids[end], :))'
-    [State(
-        Z[i, :],
-        k,
-        m
-    ) for i in 1:size(Z)[1]]
+    pairs = [s => length(v) for (s, v) in init_pairs]
+    state = State(pairs...)
+    alter(state, init_pairs...)
 end
 
 function Base.size(s::State)
@@ -113,7 +91,38 @@ function merge(states::State...)
     end...)
 
     State(z, ids, map)
+end 
+
+function select(state::State, ids::Symbol...)
+    new_state = State(
+        (ids .=> [length(state.map[id]) for id in ids])...
+    )
+    alter(new_state,
+        [id => state[id] for id in ids]...
+    )
 end
+
+function unspool(state::State, pairs...)
+    # For N pairs of IDs (:a, :b), interprets each :a as a list of :b
+    #   and creates a new state with each :b in that list.
+    #   Useful for parsing histories.
+    #   Assumes |a|/|b| is the same for all pairs
+    #   (each :a can be divided into the same number of :b's)
+
+    N = length(state[pairs[1][1]]) ÷ length(state[pairs[1][2]])
+
+    reverse(map(1:N) do i
+        init_pairs = map(1:length(pairs)) do j
+            n_b = length(state[pairs[j][2]])
+            range = ((i-1)*n_b+1) : ((i)*n_b)
+            pairs[j][2] => state[pairs[j][1]][range]
+        end
+        State(init_pairs...)
+    end)
+end
+
+
+
 
 
 struct StateDist
@@ -184,12 +193,28 @@ function alter(state::StateDist, substitutions::Pair{Symbol, Matrix{Float64}}...
     StateDist(copy(z_buf), state.w, state.ids, state.map)
 end
 
-function draw(dist::StateDist; n=1, as_dist=true, reweight=true)
+
+function select(state_dist::StateDist, ids::Symbol...)
+    new_state = State(
+        (ids .=> [length(state_dist.map[id]) for id in ids])...
+    )
+    new_state_dist = StateDist(new_state, length(state_dist))
+    alter(new_state_dist,
+        [id => state_dist[id] for id in ids]...
+    )
+end
+
+function reweight(state::StateDist, weights)
+    StateDist(state.z, weights, state.ids, state.map)
+end
+
+function draw(dist::StateDist; n=1, as_dist=true, reweight=true, weight=true)
     # Zygote.ignore() do
-        idxs = wdsample(1:length(dist), exp.(dist.w), n)
-        # idxs = dsample(1:length(dist), n)
-        # idxs = rand(1:length(dist), n)
-        # idxs = repeat(1:length(dist), n ÷ length(dist) + 1)[1:n]
+        if weight
+            idxs = wdsample(1:length(dist), exp.(dist.w), n)
+        else
+            idxs = rand(1:length(dist), n)
+        end
         if as_dist
             w = if reweight
                 log.(exp.(dist.w[idxs]) ./ sum(exp.(dist.w[idxs])))
@@ -203,6 +228,23 @@ function draw(dist::StateDist; n=1, as_dist=true, reweight=true)
             end
         end
     # end
+end
+
+
+function subdist(states::StateDist; n=20, weighted=true)
+    if n > length(states)
+        return states
+    end
+    weights = (weighted) ? Weights(exp.(states.w)) : Weights(ones(length(states)))
+    idxs = StatsBase.sample(1:length(states), weights, n)
+    w = log.(exp.(states.w[idxs]) ./ sum(exp.(states.w[idxs])))
+    StateDist(states.z[idxs, :], w, states.ids, states.map)
+end
+
+
+function subdist(states::StateDist, idxs)
+    w = log.(exp.(states.w[idxs]) ./ sum(exp.(states.w[idxs])))
+    StateDist(states.z[idxs, :], w, states.ids, states.map)
 end
 
 function Base.copy(dist::StateDist)

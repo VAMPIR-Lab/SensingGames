@@ -1,17 +1,18 @@
 
-function solve(callback, game::SensingGame, game_params, cost_fns, options)
+function solve(callback, game::ContinuousGame, prior_belief, game_params, cost_fns, options)
     seed = abs(rand(Int))
     global _game_rng = MersenneTwister(seed)
 
     function score(θ, agent)
-        hist = rollout(game, θ, n=options.n_lookahead)
+        hist = step(game, draw(prior_belief; n=options.batch_size), θ, n=options.n_lookahead)
         cost_fns[agent](hist)
     end
 
     flux_setups = (;
-        p1 = Flux.setup(Adam(1e-4), game_params[:p1]),
-        p2 = Flux.setup(Adam(1e-4), game_params[:p2]),
+        p1 = Flux.setup(Adam(1e-3), game_params[:p1]),
+        p2 = Flux.setup(Adam(1e-3), game_params[:p2]),
     )
+    
 
     for t in 1:options.n_iters
 
@@ -29,6 +30,10 @@ function solve(callback, game::SensingGame, game_params, cost_fns, options)
     end
 
     return game_params
+end
+
+function solve(game::ContinuousGame, initial_dist, game_params, cost_fns, options)
+    solve((_) -> false, game, initial_dist, game_params, cost_fns, options)
 end
 
 # TODO: This is very sloppy

@@ -33,13 +33,11 @@ using Debugger
 # using Wandb
 using Logging
 
-abstract type Policy end
-abstract type AbstractState end
-abstract type Game end
-
 include("utils.jl")
 include("statespaces.jl")
 include("games.jl")
+include("game_utils.jl")
+include("beliefs.jl")
 include("solvers.jl")
 include("policies.jl")
 include("dynamics.jl")

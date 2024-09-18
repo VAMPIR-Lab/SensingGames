@@ -83,7 +83,7 @@ function test_localization()
     prior_fn = make_localization_prior(zero_state)
     cost_fn =  make_localization_cost([[0.0; 2.0], [0.0; -2.0]])
 
-    localization_game = SensingGame(prior_fn, dyn_fns, cost_fn)
+    localization_game = ContinuousGame(prior_fn, dyn_fns, cost_fn)
     options = (;
         parallel = false,
         n_particles = 1, # TODO - this is misleading under StateDists
@@ -114,7 +114,7 @@ function test_localization()
     solve(localization_game, initial_params, options) do (t, particles, params)
         plt = plot(aspect_ratio=:equal, lims=(-3, 3))
         title!("Localization: t=$t")
-        dists = rollout(localization_game, params, n=options.n_lookahead)
+        dists = step(localization_game, params, n=options.n_lookahead)
         render_localization(dists)
         display(plt)
     end

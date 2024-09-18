@@ -4,29 +4,37 @@
 #   the dynamics a single step. 
 
 # Planar velocity integrator
-function make_vel_dynamics_step(agent::Symbol; dt=1.0, dims=2, control_scale=1.0)
+function make_vel_dynamics_step(agent::Symbol; dt=1.0, control_scale=1.0)
     id_pos = Symbol("$(agent)_pos")
     id_vel = Symbol("$(agent)_vel")
+    id_θ = Symbol("$(agent)_θ")
 
-    function vel_dyn(state::StateDist, game_params)
-        pos = state[id_pos] + dt*state[id_vel]*control_scale
-        if agent == :p1
-            pos = pos .+ randn(size(pos)...)
-        end
-        q = alter(state,
-            id_pos => pos
+    function dynamics(state::StateDist, game_params)
+        
+        vel = state[id_vel]
+        pos = state[id_pos] + dt*vel * control_scale
+
+        # if rand() < 0.005
+        #     pos = 60 * rand(size(pos)...) .- 30
+        # end
+
+        alter(state,
+            id_pos => pos,
+            id_θ => atan.(vel[:, 2], vel[:, 1])[:, :]
         )
-        q
     end
+
+    GameComponent(dynamics, [id_pos, id_θ])
 end
 
 # Planar acceleration integrator
-function make_acc_dynamics_step(agent::Symbol; dt=1.0, dims=2, drag=0.0, control_scale=1.0, max_vel=100.0)
+function make_acc_dynamics_step(agent::Symbol; dt=1.0, control_scale=1.0, max_vel=2.0)
     id_pos = Symbol("$(agent)_pos")
     id_vel = Symbol("$(agent)_vel")
     id_acc = Symbol("$(agent)_acc")
+    id_θ = Symbol("$(agent)_θ")
 
-    function acc_dyn(state::StateDist, game_params)
+    function dynamics(state::StateDist, game_params)
         acc = state[id_acc] .* control_scale
         vel = state[id_vel] .+ acc*dt
         vel = softclamp.(vel, -max_vel, max_vel)
@@ -34,50 +42,49 @@ function make_acc_dynamics_step(agent::Symbol; dt=1.0, dims=2, drag=0.0, control
 
         alter(state, 
             id_pos => pos,
-            id_vel => vel
+            id_vel => vel,
+            id_θ => atan.(vel[:, 2], vel[:, 1])[:, :]
         )
     end
+
+    GameComponent(dynamics, [id_pos, id_vel, id_θ])
 end
 
 # Unicycle dynamics
-function make_unicycle_dynamics_step(agent::Symbol; dt=1.0)
+function make_vel_unicycle_dynamics_step(agent::Symbol; dt=1.0, control_scale=1.0, angular_control_scale=1.0)
     id_pos = Symbol("$(agent)_pos")
     id_θ = Symbol("$(agent)_θ")
-    id_u = Symbol("$(agent)_u")
+    id_vω = Symbol("$(agent)_vω")
 
-    function unicycle_dyn(state::StateDist, game_params)
-        v = 0.1 
-        # θ = game_params.dθ
-        # dθ = 0
-        # dθ = game_params.dθ
-        v  = 1 + (1 + tanh.(state[id_u][1]))*1
-        dθ = 0.5*tanh.(state[id_u][2])
+    function dynamics(state::StateDist, game_params)
+        v = (tanh.(state[id_vω][:, 1]) .+ 1)./2 .+ 1
+        ω = 0.1*state[id_vω][:, 2]
+        θ = state[id_θ]
 
-        θ = state[id_θ][1] + dt*dθ
-        if θ > π
-            θ -= 2π
-        elseif θ < -π
-            θ += 2π
-        end
 
-        # dθ = game_params.dθ
-        vel = v .* [cos(θ); sin(θ)]
+        θ_new = ω[:, :]
+        vel = v .* [cos.(θ_new) sin.(θ_new)]
 
-        alter(state, 
-            id_pos => state[id_pos] .+ dt*vel,
-            id_θ => [θ]
+        pos = state[id_pos] + dt*vel*control_scale
+        alter(state,
+            id_pos => pos,
+            id_θ => θ_new
         )
     end
+
+    GameComponent(dynamics, [id_pos, id_θ])
 end
 
-# Bound: Gently bounces players off a given bound
+# Bound: Clamp part of the state into a certain region
 #   This prevents players from accidentally overshooting the
 #   bound (porentially receiving a very high penalty) - should be
 #   set slightly outside of the actual constraint
-function make_bound_step(id, lower, upper; ω=1.0)
-    function bound_dyn(state::StateDist, gp)
+function make_bound_step(id, lower, upper; ω=0.0)
+    function bound(state::StateDist, gp)
         alter(state,
-            id => softclamp.(state[id], lower + ω*rand(), upper + ω*rand())
+            id => clamp.(state[id], lower + ω*rand(), upper + ω*rand())
         )
     end
+
+    GameComponent(bound, [id])
 end

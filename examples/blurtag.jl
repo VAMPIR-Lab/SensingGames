@@ -121,7 +121,7 @@ function test_blurtag()
     prior_fn = make_blurtag_prior(zero_state)
     cost_fns = make_blurtag_costs()
 
-    blurtag_game = SensingGame(prior_fn, dyn_fns)
+    blurtag_game = ContinuousGame(prior_fn, dyn_fns)
 
     options = (;
         n_lookahead = 5,
@@ -132,7 +132,7 @@ function test_blurtag()
 
     iter = 1
     solve(blurtag_game, init_params, cost_fns, options) do params
-        hist = rollout(blurtag_game, params, n=options.n_lookahead)
+        hist = step(blurtag_game, params, n=options.n_lookahead)
 
         plt = plot(aspect_ratio=:equal, lims=(-30, 50))
         title!("Planar blurtag step=$iter")
