@@ -373,7 +373,7 @@ function test_multitag(num_p=1, num_e=1)
 
         # Each player solves their game
         iter = 0
-        p1_params = solve(fovtag_game, beliefs, params, cost_fns, optimization_options) do params
+        params = solve(fovtag_game, beliefs, params, cost_fns, optimization_options) do params
 
             print(".")
             iter += 1
@@ -390,9 +390,16 @@ function test_multitag(num_p=1, num_e=1)
         #     p2 = p2_params[:p2]
         # )
 
-        true_state = step(fovtag_game, true_state, true_params)
-        update(p1_belief, select(true_state, p1_ids...)[1], p1_params)
-        update(p2_belief, select(true_state, p2_ids...)[1], p2_params)
+        true_state = step(fovtag_game, true_state, params)
+        for i = 1:(num_p)
+            p = Symbol("p$(i)")
+            update(beliefs[p], select(true_state, ids[p]...)[1], params[p])
+        end
+        for j = 1:(num_e)
+            e = Symbol("e$(j)")
+            update(beliefs[e], select(true_state, ids[e]...)[1], params[e])
+        end
+        
 
         # Big assumption: p1_params = p2_params = true_params
         render_fovtag(renderer, [
