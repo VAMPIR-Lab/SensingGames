@@ -21,8 +21,6 @@ function GameComponent(rollout_fn, output_ids)
     )
 end
 
-
-
 function step(g::ContinuousGame, initial_state, game_params; n)
     state = initial_state
     hist = [state]

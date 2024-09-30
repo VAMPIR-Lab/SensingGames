@@ -32,7 +32,6 @@ function make_fovtag_sensing_step(agent, other; fov, scale=100.0, offset=2)
     function get_gaussian_params(state_dist)
         our_pos = state_dist[id_own_pos]
         their_pos = state_dist[id_other_pos]
-
         θ1 = state_dist[id_own_θ] .+ π
         θ2 = atan.(our_pos[:, 2] .- their_pos[:, 2], our_pos[:, 1] .- their_pos[:, 1])
         dθ = angdiff.(θ1, θ2)
@@ -59,8 +58,11 @@ function make_fovtag_sensing_step(agent, other; fov, scale=100.0, offset=2)
         # sigma: (|dist| x 1) => (|dist| x 1 x 1)
         # x:     (|info| x 2) => (1 x |info| x 2)
         μ = reshape(μ, (length(state_dist), 1, 2))
+        println(size(μ))
         σ2 = reshape(σ2, (length(state_dist), 1, 1))
+        println(size(σ2))
         x = reshape(x, (1, length(compare_dist), 2))
+        println(size(x))
 
         # Note that we use the true Gaussian PDF (not the trimmed one)
         p = prod(SensingGames.gauss_pdf.(x, μ, σ2), dims=3)

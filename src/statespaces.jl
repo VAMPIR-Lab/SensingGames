@@ -124,7 +124,10 @@ end
 
 
 
-
+# Each row of z is a State
+# w is the weight factor for each state
+# ids are the components of a State
+# map gives the index range for ids
 struct StateDist
     z::Matrix{Float64}
     w::Vector{Float64}
