@@ -16,9 +16,9 @@ function make_nn_control(agent, id_input, id_output; t_max=7)
         in = history
         out = model.subpols[1](transpose(in))'
 
-        action = out[:, 1:2]
-        scale = tanh.(out[:, 3])
-        scaled_action = scale .* action ./ sqrt.(sum(action .^ 2, dims=2))
+        action = out[:, 1:2] .+ rand()*0.0001
+        scale = tanh.(out[:, 3]) .+ rand()*0.0001
+        scaled_action = scale .* action ./ (sqrt.(sum(action .^ 2, dims=2)))
 
         alter(dist, 
             id_output => scaled_action

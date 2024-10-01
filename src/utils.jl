@@ -164,3 +164,10 @@ end
 function randu(rng, l, u)
     rand(rng) * (u - l) + l
 end
+
+
+
+@views function makechunks(X::AbstractVector, n::Integer)
+    c = length(X) ÷ n
+    return [X[1+c*k:(k == n-1 ? end : c*k+c)] for k = 0:n-1]
+end

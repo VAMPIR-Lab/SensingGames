@@ -29,7 +29,7 @@ function draw(d::LateParticleBelief; n)
     dist
 end
 
-function update(d::LateParticleBelief, ego_state, true_params)
+function update!(d::LateParticleBelief, ego_state, true_params)
     d.t_world += 1
 
     if d.t_world > d.delay
@@ -51,7 +51,7 @@ function draw(belief::ConditionedParticleBelief; n)
     draw(belief.dist; n)
 end
 
-function update(belief::ConditionedParticleBelief, ego_state, params)
+function update!(belief::ConditionedParticleBelief, ego_state, params)
     belief.dist = step(belief.game, belief.dist, ego_state, params)
 end
 
@@ -63,14 +63,28 @@ mutable struct JointParticleBelief
 end
 
 function draw(belief::JointParticleBelief; n)
-    draw(belief.dist; n)
+    Zygote.ignore() do
+        draw(belief.dist; n)
+    end
 end
 
-function update(belief::JointParticleBelief, ego_state, params)
+function update!(belief::JointParticleBelief, ego_state, params::NamedTuple)
     # In this version we don't even care about the ego state
     # This is "technically correct" in that as soon as we use our truego
     #    state in our belief, we diverge from the opponent
     belief.dist = step(belief.game, belief.dist, params)
+end
+
+
+function update!(belief::JointParticleBelief, params::NamedTuple)
+    belief.dist = step(belief.game, belief.dist, params)
+end
+
+function multi_update!(belief::JointParticleBelief, params::AbstractArray)
+    chunks = split(belief.dist, length(params))
+    belief.dist = stack(map(enumerate(chunks)) do (i, chunk)
+        step(belief.game, chunk, params[i])
+    end)
 end
 
 mutable struct HybridParticleBelief
@@ -80,10 +94,12 @@ mutable struct HybridParticleBelief
 end
 
 function draw(belief::HybridParticleBelief; n)
-    draw(belief.dist; n)
+    Zygote.ignore() do
+        draw(belief.dist; n)
+    end
 end
 
-function update(belief::HybridParticleBelief, ego_state, params)
+function update!(belief::HybridParticleBelief, ego_state, params)
     
     N = length(belief.dist)
     γ = belief.γ
@@ -95,12 +111,34 @@ function update(belief::HybridParticleBelief, ego_state, params)
     joint_dist = draw(joint_dist; n=j)
 
     cond_dist = step(belief.game, belief.dist, ego_state, params; normalize=true)
-    cond_dist = draw(cond_dist; n=c)
+    cond_dist = draw(cond_dist; n=c, reweight=true)
 
     Z = [joint_dist.z; cond_dist.z]
     w = [joint_dist.w .+ log(1 - γ); cond_dist.w .+ log(γ)]
     # w = log.(exp.(w) ./ sum(exp.(w))) 
 
     belief.dist = StateDist(Z, w, joint_dist.ids, joint_dist.map)
-    @show length(belief.dist)
+end
+
+
+function multi_update!(belief::HybridParticleBelief, ego_state, params::AbstractArray)
+    chunks = split(belief.dist, length(params))
+    belief.dist = stack(map(enumerate(chunks)) do (i, chunk)
+        N = length(chunk)
+        γ = belief.γ
+        c = Int(floor(γ*N))
+        c = clamp(c, 1, N-1)
+        j = (N - c)
+    
+        joint_dist = step(belief.game, chunk, params[i])
+        joint_dist = draw(joint_dist; n=j, reweight=true)
+    
+        cond_dist = step(belief.game, chunk, ego_state, params[i]; normalize=true)
+        cond_dist = draw(cond_dist; n=c, reweight=true)
+    
+        Z = [joint_dist.z; cond_dist.z]
+        w = [joint_dist.w .+ log(1 - γ); cond_dist.w .+ log(γ)]
+    
+        StateDist(Z, w, joint_dist.ids, joint_dist.map)
+    end)
 end

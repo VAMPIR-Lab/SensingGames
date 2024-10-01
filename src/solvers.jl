@@ -8,18 +8,22 @@ function solve(callback, game::ContinuousGame, prior_belief, game_params, cost_f
         cost_fns[agent](hist)
     end
 
+    # TODO - Special casing for two player games
     flux_setups = (;
-        p1 = Flux.setup(Adam(1e-3), game_params[:p1]),
-        p2 = Flux.setup(Adam(1e-3), game_params[:p2]),
+        p1 = Flux.setup(Adam(5e-4), game_params[:p1]),
+        p2 = Flux.setup(Adam(5e-4), game_params[:p2]),
     )
     
 
     for t in 1:options.n_iters
 
         for (agent, params) in pairs(game_params)
+            # @show score(game_params, agent)
 
-            reseed!(seed + t ÷ options.steps_per_seed)
             c, grads = Flux.withgradient(θ -> score(θ, agent), game_params)
+            # println(grads)
+            # @show c
+            # @show grads
             Flux.Optimisers.update!(flux_setups[agent], params, grads[1][agent])
         end
 

@@ -16,29 +16,29 @@ end
 function GameComponent(rollout_fn, output_ids)
     GameComponent(
         rollout_fn,
-        (state_in, state_out, params) -> ones(length(state_in)),
+        (state_in, state_out, params) -> zeros(length(state_in)),
         output_ids
     )
 end
 
 
 
-function step(g::ContinuousGame, initial_state, game_params; n)
+function step(g::ContinuousGame, initial_state, game_params; n=1)
     state = initial_state
     hist = [state]
+
 
     for t in 1:n
         for component in g.components
             state = component.rollout_fn(state, game_params)
+            if NaN ∈ state.z
+                throw(ArgumentError("Transitioned to a NaN state"))
+            end
         end
         hist = [hist; state]
     end
     
-    hist
-end
-
-function step(g::ContinuousGame, initial_state, game_params)
-    step(g, initial_state, game_params; n=1)[end]
+    (n == 1) ? hist[end] : hist
 end
 
 function step(g::ContinuousGame, initial_dist::StateDist, ground_state::State, game_params; normalize=true)
@@ -50,16 +50,17 @@ function step(g::ContinuousGame, initial_dist::StateDist, ground_state::State, g
     ground_dist = StateDist(ground_state, length(state_dist))
     ground_dist_single = StateDist([ground_state])
 
+    @show ground_dist.ids
+
+
+
     for component in g.components
         ids = component.output_ids
-        matches = [id ∈ ground_dist.ids for id in ids]
+        matches = [id ∈ ground_state.ids for id in ids]
 
         if all(matches)
             lik = component.lik_fn(state_dist, ground_dist_single, game_params)
             w = (w .+ lik)[:, 1, 1]
-            if(normalize)
-                w = log.(exp.(w) ./ sum(exp.(w)))
-            end
             
             state_dist = alter(state_dist, 
                 (ids .=> [ground_dist[id] for id in ids])...
@@ -69,5 +70,9 @@ function step(g::ContinuousGame, initial_dist::StateDist, ground_state::State, g
         end
     end
     
+    if(normalize)
+        w = log.(exp.(w) ./ sum(exp.(w)))
+    end
+
     reweight(state_dist, w)
 end

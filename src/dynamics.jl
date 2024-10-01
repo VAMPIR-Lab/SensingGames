@@ -9,14 +9,14 @@ function make_vel_dynamics_step(agent::Symbol; dt=1.0, control_scale=1.0)
     id_vel = Symbol("$(agent)_vel")
     id_θ = Symbol("$(agent)_θ")
 
+
     function dynamics(state::StateDist, game_params)
         
         vel = state[id_vel]
         pos = state[id_pos] + dt*vel * control_scale
 
-        # if rand() < 0.005
-        #     pos = 60 * rand(size(pos)...) .- 30
-        # end
+        # telepos = 60 * rand(size(pos)...) .- 30
+        # pos = pos .+ round.(rand(size(pos)...) .- 0.48) .* telepos
 
         alter(state,
             id_pos => pos,

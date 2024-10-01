@@ -23,6 +23,15 @@ function make_clock_step(dt)
     GameComponent(clock, [:t])
 end
 
+
+# Convenience: Component that does nothing
+function make_identity_step()
+    GameComponent(
+        (dist, params) -> dist,
+        []
+    )
+end
+
 # function make_cross_step(dyn_fn, ll_fn, n, alter_ids)
 
 #     num_counterfactuals = ((n isa AbstractVector) ? (t) -> n[t] : (t) -> n) 

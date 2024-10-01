@@ -211,7 +211,7 @@ end
 function draw(dist::StateDist; n=1, as_dist=true, reweight=true, weight=true)
     # Zygote.ignore() do
         if weight
-            idxs = wdsample(1:length(dist), exp.(dist.w), n)
+            idxs = StatsBase.sample(1:length(dist), Weights(exp.(dist.w)), n)
         else
             idxs = rand(1:length(dist), n)
         end
@@ -231,21 +231,34 @@ function draw(dist::StateDist; n=1, as_dist=true, reweight=true, weight=true)
 end
 
 
-function subdist(states::StateDist; n=20, weighted=true)
-    if n > length(states)
-        return states
+function subdist(states::StateDist, range)
+    StateDist(
+        states.z[range, :],
+        states.w[range],
+        states.ids,
+        states.map
+    )
+end
+
+function split(states::StateDist, n)
+    all_idxs = shuffle(1:length(states))
+    chunks = makechunks(all_idxs, n)
+    map(chunks) do idxs
+        subdist(states, idxs)
     end
-    weights = (weighted) ? Weights(exp.(states.w)) : Weights(ones(length(states)))
-    idxs = StatsBase.sample(1:length(states), weights, n)
-    w = log.(exp.(states.w[idxs]) ./ sum(exp.(states.w[idxs])))
-    StateDist(states.z[idxs, :], w, states.ids, states.map)
+end
+
+function stack(dists::AbstractArray{StateDist})
+    Z = mapreduce(vcat, dists) do dist
+        dist.z
+    end
+    w = mapreduce(vcat, dists) do dist
+        dist.w
+    end
+    StateDist(Z, w, dists[1].ids, dists[1].map)
 end
 
 
-function subdist(states::StateDist, idxs)
-    w = log.(exp.(states.w[idxs]) ./ sum(exp.(states.w[idxs])))
-    StateDist(states.z[idxs, :], w, states.ids, states.map)
-end
 
 function Base.copy(dist::StateDist)
     StateDist(
