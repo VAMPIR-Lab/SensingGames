@@ -185,7 +185,7 @@ function test_fovtag()
     p1_belief = HybridParticleBelief(fovtag_game, prior_fn(), 0.01)
     p2_belief = HybridParticleBelief(fovtag_game, prior_fn(), 0.01)
 
-    true_state = StateDist([prior_fn()[rand(1:10)]])
+    true_state = StateDist([prior_fn()[rand(1:100)]])
     p1_ids = [:t; :p1_pos; :p1_vel; :p1_θ; :p1_obs; :p1_pos_h; :p1_obs_h]
     p2_ids = [:t; :p2_pos; :p2_vel; :p2_θ; :p2_obs; :p2_pos_h; :p2_obs_h]
 
@@ -233,7 +233,6 @@ function test_fovtag()
         update(p1_belief, select(true_state, p1_ids...)[1], p1_params)
         update(p2_belief, select(true_state, p2_ids...)[1], p2_params)
 
-        # Big assumption: p1_params = p2_params = true_params
         render_fovtag(renderer, [
             (draw(p1_belief; n=20), true_params),
             (true_state, true_params),

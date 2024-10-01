@@ -176,6 +176,8 @@ end
 
 function test_multitag(num_p=1, num_e=1)
     T = 5
+    n_particles=1000
+
     fov = NamedTuple()
     for i = 1:num_p
         p = Symbol("p$(i)")
@@ -295,32 +297,30 @@ function test_multitag(num_p=1, num_e=1)
         values(ang_hist_step)...,
         values(control_step)...,
         values(dyn_step)...,
-        # bound_step...
     ])
 
-    # Version of the game where players don't get new information
-    #   during planning (no active information gathering)
-    inactive_fovtag_game = ContinuousGame([
-        clock_step,
-        values(pos_hist_step)...,
-        values(ang_hist_step)...,
-        values(control_step)...,
-        values(dyn_step)...,
-        # bound_step...
-    ])
+    prior_fn = make_fovtag_prior(zero_state, n=n_particles)
 
-    prior_fn = make_fovtag_prior(zero_state, n=1000)
-    beliefs = NamedTuple()
-    for i = 1:(num_p)
-        p = Symbol("p$(i)")
-        beliefs = merge(beliefs, (p => HybridParticleBelief(fovtag_game, prior_fn(), 0.01),))
-    end
-    for j = 1:(num_e)
-        e = Symbol("e$(j)")
-        beliefs = merge(beliefs, (e => HybridParticleBelief(fovtag_game, prior_fn(), 0.01),))
-    end
+    # Shared brain: Everyone agrees on the belief
+    joint_belief = JointParticleBelief(fovtag_game, prior_fn())
 
-    true_state = StateDist([prior_fn()[rand(1:10)]])
+    # <Mel> Aside: I added some explanation of what these <X>ParticleBeliefs mean
+    #   over in `beliefs.jl`.
+
+    # Separate brains: Everyone has their own belief
+    # beliefs = NamedTuple()
+    # for i = 1:(num_p)
+    #     p = Symbol("p$(i)")
+    #     beliefs = merge(beliefs, (p => HybridParticleBelief(fovtag_game, prior_fn(), 0.01),))
+    # end
+    # for j = 1:(num_e)
+    #     e = Symbol("e$(j)")
+    #     beliefs = merge(beliefs, (e => HybridParticleBelief(fovtag_game, prior_fn(), 0.01),))
+    # end
+
+
+    true_state = make_fovtag_prior(zero_state, n=1)() # Just updated; not tested
+
     ids = NamedTuple()
     for i = 1:(num_p)
         p = Symbol("p$(i)")
@@ -347,18 +347,8 @@ function test_multitag(num_p=1, num_e=1)
     renderer = MakieRenderer()
 
 
-    # p1_params = (;
-    #     p1 = make_policy(4*T, 3; t_max=T), # π_1^(1)
-    #     p2 = make_policy(4*T, 3; t_max=T)  # π_2^(1)
-    # )
-    # p2_params = (;
-    #     p1 = make_policy(4*T, 3; t_max=T), # π_1^(2)
-    #     p2 = make_policy(4*T, 3; t_max=T)  # π_2^(2)
-    # )
-    # true_params = (;
-    #     p1 = p1_params[:p1],
-    #     p2 = p2_params[:p2]
-    # )
+    # In split brain we would need one of these `params` tuples for EVERY player
+    #   (each of which would contain policy parameters for every player)
     params = NamedTuple()
     for i = 1:(num_p)
         p = Symbol("p$(i)")
@@ -371,37 +361,25 @@ function test_multitag(num_p=1, num_e=1)
 
     for t in 1:1000
 
-        # Each player solves their game
-        iter = 0
-        params = solve(fovtag_game, beliefs, params, cost_fns, optimization_options) do params
-
-            print(".")
-            iter += 1
-            if iter % optimization_options.steps_per_render != 0
-                return false
-            end
-
-            return false
-        end
-
-        # p2_params = solve(fovtag_game, p2_belief, true_params, cost_fns, optimization_options)
-        # true_params = (;
-        #     p1 = p1_params[:p1],
-        #     p2 = p2_params[:p2]
-        # )
+        # <Mel> The do block on `solve` is optional and what had been here was cruft (my bad)
+        params = solve(fovtag_game, joint_belief, params, cost_fns, optimization_options)
 
         true_state = step(fovtag_game, true_state, params)
-        for i = 1:(num_p)
-            p = Symbol("p$(i)")
-            update(beliefs[p], select(true_state, ids[p]...)[1], params[p])
-        end
-        for j = 1:(num_e)
-            e = Symbol("e$(j)")
-            update(beliefs[e], select(true_state, ids[e]...)[1], params[e])
-        end
-        
 
-        # Big assumption: p1_params = p2_params = true_params
+
+        # Shared brain
+        update(joint_belief, params)
+
+        # Separate brains
+        # for i = 1:(num_p)
+        #     p = Symbol("p$(i)")
+        #     update(beliefs[p], select(true_state, ids[p]...)[1], params[p])
+        # end
+        # for j = 1:(num_e)
+        #     e = Symbol("e$(j)")
+        #     update(beliefs[e], select(true_state, ids[e]...)[1], params[e])
+        # end
+        
         render_fovtag(renderer, [
             (draw(p1_belief; n=20), true_params),
             (true_state, true_params),
