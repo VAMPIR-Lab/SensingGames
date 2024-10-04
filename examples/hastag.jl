@@ -24,7 +24,7 @@ using Dates
 
 
 
-function make_hastag_sensing_step(agent, other; fov, scale=100.0, offset=2, block=[0 -20], brad=5)
+function make_hastag_sensing_step(agent, other; fov, scale=100.0, offset=2, block=[0 -35], brad=5)
     id_obs = Symbol("$(agent)_obs")
     id_own_θ = Symbol("$(agent)_θ")
     id_own_pos = Symbol("$(agent)_pos")
@@ -80,28 +80,28 @@ function make_hastag_sensing_step(agent, other; fov, scale=100.0, offset=2, bloc
     GameComponent(rollout_observation, lik_observation, [id_obs])
 end
 
-function make_hastag_costs(block=[0 -20], brad=5)
+function make_hastag_costs(block=[0 -35], brad=5)
+
+    function cost_obstacle(d)
+        (d > brad) ? -0.001*(d-brad) : -1000*(d-brad)
+    end
 
     function cost1(hist)
         sum(hist) do distr
-            d = (sum((distr[:p1_pos] .- distr[:p2_pos]).^2, dims=2))
-            l = sum((distr[:p1_pos]).^2, dims=2)
-            # b = cost_bound.(l, -1, 40^2)
-            b = cost_bound.(distr[:p1_pos], [-40 -40], [40 40])
-            r = cost_regularize.(distr[:p1_vω], α=10)
-            bdist = sqrt.((distr[:p1_pos][:,1] .- block[1]).^2 .+ ((distr[:p1_pos])[:,2] .- block[2]).^2)
-            o = -bdist .* ((bdist > brad) ? 0.0001 : 100)
-            sum((b .+ r .+ d .+ o) .* exp.(distr.w))
+            sum((
+                (sum((distr[:p1_pos] .- distr[:p2_pos]).^2, dims=2)) .+
+                cost_bound.(sqrt.(sum((distr[:p1_pos]).^2, dims=2)), [0], [40]) .+
+                cost_obstacle.(sqrt.(sum((distr[:p1_pos] .- block).^2, dims=2)))
+            ) .* exp.(distr.w))
         end
     end
     function cost2(hist)
         sum(hist) do distr
-            bdist = sqrt.((distr[:p2_pos][:,1] .- block[1]).^2 .+ ((distr[:p2_pos])[:,2] .- block[2]).^2)
-            sum((-(sum((distr[:p1_pos] .- distr[:p2_pos]).^2, dims=2)) .+
-            cost_bound.(sqrt.(sum((distr[:p2_pos]).^2, dims=2)), [0], [40]) .+
-            cost_regularize.(distr[:p2_vω], α=10)) .+
-            (-bdist .* ((bdist > brad) ? 0.0001 : 100))) .*
-            exp.(distr.w)
+            sum((
+                -(sum((distr[:p1_pos] .- distr[:p2_pos]).^2, dims=2)) .+
+                cost_bound.(sqrt.(sum((distr[:p2_pos]).^2, dims=2)), [0], [40]) .+
+                cost_obstacle.(sqrt.(sum((distr[:p2_pos] .- block).^2, dims=2)))
+            ) .* exp.(distr.w))
         end
     end
 
@@ -246,8 +246,8 @@ function test_hastag()
         #p1_belief.dist[:p2_pos]
 
         true_state = step(hastag_game, true_state, true_params)
-        update(p1_belief, select(true_state, p1_ids...)[1], p1_params)
-        update(p2_belief, select(true_state, p2_ids...)[1], p2_params)
+        update!(p1_belief, select(true_state, p1_ids...)[1], p1_params)
+        update!(p2_belief, select(true_state, p2_ids...)[1], p2_params)
 
         # Big assumption: p1_params = p2_params = true_params
         render_hastag(renderer, [
@@ -258,7 +258,7 @@ function test_hastag()
     end
 end
 
-function render_hastag(renderer, dists, game, fov; T)
+function render_hastag(renderer, dists, game, fov; block_pos=(0, -35), block_r=5, T)
 
     unspool_scheme = [
         :p1_pos_h => :p1_pos,
@@ -277,6 +277,9 @@ function render_hastag(renderer, dists, game, fov; T)
         for (col, (dist, params)) in enumerate(dists)
 
             plan = step(game, dist, params; n=T)[end]
+
+            render_static_circle(renderer, (0, 0), 45; ax_idx=(1, col))            
+            render_static_circle(renderer, block_pos, block_r; ax_idx=(1, col))
 
             for i in 1:length(dist)
                 current_state = dist[i]
