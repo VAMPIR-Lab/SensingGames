@@ -121,7 +121,7 @@ function render_fov(r::MakieRenderer, state::State, fov, id_pos, id_θ; ax_idx,
         [($pos[1], $pos[2]); [(
             $state[id_pos][1] + scale*cos($state[id_θ][1] + k),
             $state[id_pos][2] + scale*sin($state[id_θ][1] + k)
-        ) for k in (-fov/2):0.1:(fov/2)]]
+        ) for k in (-fov/2):0.5:(fov/2)]]
     )
     poly!(ax, vertices; 
         color, alpha, kwargs...

@@ -140,7 +140,7 @@ function make_multitag_costs(num_p, num_e)
                     d = d .+ sum((distr[p_pos] .- distr[e_pos]).^2, dims=2)
                 end
                 d = d / num_p
-                b = cost_bound.(distr[p_pos], [-40 -40], [40 40])
+                b = cost_bound.(sqrt.(sum((distr[:p_pos]).^2, dims=2)), [0], [40])
                 r = cost_regularize.(distr[p_vω], α=10)
                 sum((b .+ r .+ d) .* exp.(distr.w))
             end
@@ -163,7 +163,7 @@ function make_multitag_costs(num_p, num_e)
                     d = d .- sum((distr[p_pos] .- distr[e_pos]).^2, dims=2)
                 end
                 d = d / num_p
-                b = cost_bound.(distr[e_pos], [-40 -40], [40 40])
+                b = cost_bound.(sqrt.(sum((distr[:e_pos]).^2, dims=2)), [0], [40])
                 r = cost_regularize.(distr[e_vω], α=10)
                 sum((b .+ r .+ d) .* exp.(distr.w))
             end
@@ -219,7 +219,7 @@ function test_multitag(num_p=2, num_e=2)
 
     optimization_options = (;
         n_lookahead = T,
-        n_iters = 1,
+        n_iters = 5,
         batch_size = 20,
         max_wall_time = 120000, # Not respected right now
         steps_per_seed = 1,
