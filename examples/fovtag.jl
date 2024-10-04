@@ -391,7 +391,8 @@ function render_fovtag(renderer, dists, game, fov; T)
 
             for i in 1:length(dist)
                 current_state = dist[i]
-                lik = 0.1 + 0.9*exp(dist.w[i])
+                lik = exp(dist.w[i])
+    
 
                 render_location(renderer, current_state, :p1_pos; 
                     ax_idx=(1, col), color=0, alpha=1.0*lik,
