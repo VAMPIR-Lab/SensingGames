@@ -3,7 +3,7 @@
 # Sampling from Gaussian distributions
 #   We need a closed-ish form of the CDF so that Zygote can
 #   differentiate through it (sadly Distributions.jl does not
-#   fully support it yet)
+#   fully support Zygote yet, or vice versa)
 #   So I use the Bowling approximation, which is accurate to about eps=0.001:
 #       I(x) = 1 / (1 + exp(-1.702(x-mean)/sqrt(var)))
 function inverse_gauss_cdf(mean, var, p)
@@ -16,35 +16,56 @@ function gauss_cdf(mean, var, x)
 end
 
 function sample_gauss(mean, var)
-    inverse_gauss_cdf(mean, var, rand())
+    rng = SensingGames._game_rng
+    inverse_gauss_cdf(mean, var, rand(rng))
 end
 
-function sample_trunc_gauss(mean, var, a, b)
-    # Note that mean and variance correspond to the original
-    #   distribution (before truncating) - the 
-    #   moments after truncating will be different
-    prc1 = gauss_cdf(mean, var, a)
-    prc2 = gauss_cdf(mean, var, b)
-    r = rand() * (prc2 - prc1) + prc1
-    v = log(1/r - 1) * sqrt(var) / -1.702 + mean
-    return v
+function sample_gauss(mean, var, quantile)
+    inverse_gauss_cdf(mean, var, quantile)
 end
+
+function gauss_logpdf(x, mean, var)
+    -0.5 * (x-mean)^2 / var - log(2π * var)/2
+end
+
+function gauss_pdf(x, mean, var)
+    exp(-0.5 *(x-mean)^2/var) / sqrt(2π*var)
+end
+
+
+function sample_trimmed_gauss(μ, σ2, quantile; l, u, σ_trim=5)
+    new_quantile = if σ2 > σ_trim^2
+        prc1 = gauss_cdf.(μ, σ2, l)
+        prc2 = gauss_cdf.(μ, σ2, u)
+        prc1 .+ quantile.*(prc2 .- prc1)
+    else
+        quantile
+    end
+    sample_gauss(μ, σ2, new_quantile)
+end
+
+function sample_trimmed_gauss(μ, σ2; l, u)
+    sample_trimmed_gauss(μ, σ2, rand(); l, u)
+end
+
 
 
 # Very basic geometry stuff
 function dist2(a, b)
-    (a-b)'*(a-b)
+    sum((a.-b).^2)
 end
 
+dist(a, b) = sqrt(dist2(a, b))
+
 angdiff(a, b) = posmod((a - b + π), 2π) - π
-posmod(a, n) = (a - floor(a/n) * n)
+posmod(a, n) = (a - floor.(a/n) * n)
 
 
 # Some soft functions for differentiability purposes
 #   Be careful - make sure using these makes sense theoretically
-function softif(x, a, b; hardness=1)
+function softif(x, value_if_positive, value_if_negative; hardness=1)
     q = 1 / (1 + exp(-hardness * x))
-    q * a + (1-q)*b
+    q * value_if_positive + (1-q)*value_if_negative
 end
 
 function softclamp(x, a, b)
@@ -59,9 +80,9 @@ end
 
 function penalty(x)
     if x > 0
-        return 0
+        return -0.001x
     else
-        return x^6
+        return x^4
     end
 end
 
@@ -92,4 +113,61 @@ end
 
 function cost_regularize(v; α=0.1)
     α * sum(v.^2)
+end
+
+
+# Differentiable sampling
+
+
+function wsample(items, weights)
+    weights = weights ./ sum(weights)
+    id = findfirst(cumsum(weights) .> rand())
+    if isnothing(id)
+        return rand(_game_rng, items)
+    end
+    items[id]
+end
+
+function wdsample(v, w, n)
+    v = repeat(v, n ÷ length(v) + 1)
+    w = repeat(w, n ÷ length(w) + 1)
+
+    [mapreduce(vcat, 1:n) do i
+        idx = wsample(1:length(v), w)
+        res = v[idx]
+        v = [v[begin:(idx-1)]; v[(idx+1):end]]
+        w = [w[begin:(idx-1)]; w[(idx+1):end]]
+        res
+    end...]
+end
+
+
+function dsample(v, n)
+    w = ones(length(v))
+    wdsample(v, w, n)
+end
+
+
+function default(t, i, d)
+    try
+        t[i]
+    catch
+        d
+    end
+end
+
+
+function l2(v)
+    sum(v'*v)
+end
+
+function randu(rng, l, u)
+    rand(rng) * (u - l) + l
+end
+
+
+
+@views function makechunks(X::AbstractVector, n::Integer)
+    c = length(X) ÷ n
+    return [X[1+c*k:(k == n-1 ? end : c*k+c)] for k = 0:n-1]
 end

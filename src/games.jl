@@ -1,45 +1,78 @@
-struct SensingGame <: Game
-    prior_fn::Function
-    dyn_fns::Vector{Function}
-    cost_fn::Function
+using LinearAlgebra
 
-    history::Vector{State}
-    history_len::Int
+struct GameComponent
+    rollout_fn::Function
+    lik_fn::Function
+    output_ids::Vector{Symbol}
 end
 
-function SensingGame(prior_fn::Function, dyn_fns::Vector{Function}, cost_fn::Function; history_len=100)
-    SensingGame(prior_fn, dyn_fns, cost_fn, [], history_len)
+struct ContinuousGame
+    components::Vector{GameComponent}
 end
 
-function restart!(g::SensingGame)
-    empty!(g.history)
+
+# If no likelihood function is provided,
+#   just assume effectively uniform
+function GameComponent(rollout_fn, output_ids)
+    GameComponent(
+        rollout_fn,
+        (state_in, state_out, params) -> zeros(length(state_in)),
+        output_ids
+    )
 end
 
-function update!(g::SensingGame, states)
-    for s in states
-        roll!(g.history, s, g.history_len)
-    end
-    states
-end
 
-function step(g::SensingGame, game_params; n=1)
-    state = isempty(g.history) ? g.prior_fn() : g.history[end]
-    res::Vector{State} = [state]
+
+function step(g::ContinuousGame, initial_state, game_params; n=1)
+    state = initial_state
+    hist = [state]
+
 
     for t in 1:n
-        for dyn_fn in g.dyn_fns
-            h = [g.history[begin:end]; res]
-            state = dyn_fn(state, h, game_params)
+        for component in g.components
+            state = component.rollout_fn(state, game_params)
+            if NaN ∈ state.z
+                throw(ArgumentError("Transitioned to a NaN state"))
+            end
         end
-        res = [res; state]
+        hist = [hist; state]
     end
-    res
+    
+    (n == 1) ? hist[end] : hist
 end
 
-function step!(g::SensingGame, game_params; n=1)
-    update!(g, step(g, game_params; n))
-end
+function step(g::ContinuousGame, initial_dist::StateDist, ground_state::State, game_params; normalize=true)
 
-function clone(g::SensingGame)
-    SensingGame(g.prior_fn, g.dyn_fns, g.cost_fn; history_len=g.history_len)
+    state_dist = initial_dist
+    w = state_dist.w
+
+    # Assume all states are going to the same ground
+    ground_dist = StateDist(ground_state, length(state_dist))
+    ground_dist_single = StateDist([ground_state])
+
+    @show ground_dist.ids
+
+
+
+    for component in g.components
+        ids = component.output_ids
+        matches = [id ∈ ground_state.ids for id in ids]
+
+        if all(matches)
+            lik = component.lik_fn(state_dist, ground_dist_single, game_params)
+            w = (w .+ lik)[:, 1, 1]
+            
+            state_dist = alter(state_dist, 
+                (ids .=> [ground_dist[id] for id in ids])...
+            )
+        else
+            state_dist = component.rollout_fn(state_dist, game_params)
+        end
+    end
+    
+    if(normalize)
+        w = log.(exp.(w) ./ sum(exp.(w)))
+    end
+
+    reweight(state_dist, w)
 end

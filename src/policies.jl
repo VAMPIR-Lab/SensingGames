@@ -1,88 +1,112 @@
 
-
-struct FluxPolicy <: Policy
-    models::Vector{Flux.Chain}
-    n_output::Int
-    t_max::Int
-    flux_setups::Vector
+struct HistPolicy
+    subpols::Vector
 end
 
-function FluxPolicy(make_model, n_output; lr=0.004, t_max=5)
-    models = [make_model() for _ in 1:t_max]
-    FluxPolicy(
-        models, n_output, t_max,
-        [Flux.setup(Flux.Adam(lr), model) for model in models]
+Flux.@layer HistPolicy
+
+function make_nn_control(agent, id_input, id_output; t_max=7)
+    function control(dist, game_params)
+        t = Int(dist[:t][1])
+        # T = min(t, t_max)
+        history = dist[id_input]
+
+        model = game_params[agent]
+
+        in = history
+        out = model.subpols[1](transpose(in))'
+
+        action = out[:, 1:2] .+ rand()*0.0001
+        scale = tanh.(out[:, 3]) .+ rand()*0.0001
+        scaled_action = scale .* action ./ (sqrt.(sum(action .^ 2, dims=2)))
+
+        alter(dist, 
+            id_output => scaled_action
+        )
+    end
+
+    GameComponent(control, [id_output])
+end
+
+function make_policy(n_input, n_output; t_max=7)
+    HistPolicy([
+        f64(Chain(
+            Dense(n_input*t => 32, relu),
+            Dense(32 => 64, relu),
+            Dense(64 => 64, relu),
+            Dense(64 => 32, relu),
+            Dense(32 => n_output)
+        )) for t in 1:t_max]
     )
 end
 
-function (policy::FluxPolicy)(history::Vector{Vector{Float32}})
-    result::Vector{Float32} = zeros(policy.n_output)
-    hist = last(history, policy.t_max)
-
-    for (t, obs) in enumerate(reverse(hist))
-        m::Flux.Chain = policy.models[t]
-        output::Vector{Float32} = m(obs)
-        result += 0.01 * output
-    end
-
-    # p = sig(result[1])
-    # softif(rand() - p, tanh.(result[2:3]), tanh.(result[4:5]))
-    tanh.(result)
-end
-
-function apply_gradient!(policy::FluxPolicy, grads)
-    for (i, m) in enumerate(policy.models)
-        Flux.update!(policy.flux_setups[i], m, grads.models[i])
-    end
-end
 
 
-struct RandomPolicy <: Policy
-    n_output
-end
-
-function (policy::RandomPolicy)(history)
-    0.2 * tanh.(randn(policy.n_output))
-end
 
 
-struct BoundedRandomPolicy <: Policy
-    n_output
-end
+# Idea: Map [obs] -> [(true state, prob)...]
+#   then map prob, [(true state)...] -> prob, [(best response)...]
+#   then map [(prob, best response)...] -> action
 
-function (policy::BoundedRandomPolicy)(history)
-    # assume observation is position
-    dir = (rand(2).-0.5) * 20
-    dx = history[end] - dir
-    -dx / sum(dx .^ 2)
-end
+# The first one we get for free under our current assumptions
+#   (which will probably bother the RL people, but that's OK)
+#   The second one should be really easy since basically no noise
+#   The third one just interpolates according to the cost
 
 
-struct ZeroPolicy <: Policy
-    n_output
-end
-
-function (policy::ZeroPolicy)(history)
-    (zeros(policy.n_output))
-end
+# Also these have different needs:
+# (1) needs a lot of resampling (if we don't already have it)
+# (2) needs branching - otherwise only one possible true state
+#     but doesn't care about resampling, aside from gradient play
+#     weirdnesses
 
 
-function _act(policy::Policy, obs_history::Vector{Vector{Float32}})::Vector{Float32}
-    # type barrier for optimization
-    policy(obs_history)
-end
 
-function make_horizon_control(agent::Symbol, id_obs::Symbol, id_action::Symbol)
-    function dyn!(state::State, history::Vector{State}, game_params)::State
-        current_obs::Vector{Vector{Float32}} = [state[id_obs]]
-        past_obs::Vector{Vector{Float32}} = map(s -> s[id_obs], history)
-        obs_history::Vector{Vector{Float32}} = [past_obs; current_obs] 
+function make_belief_step(agent, true_id, m; consistent=true)
+    info_id = Symbol(agent, "_info")
+    belief_id = Symbol(agent, "_blf")
 
-        action::Vector{Float32} = _act(game_params.policies[agent], obs_history)
-        alter(state, 
-            id_action => action
+    function belief_step(state_dist, game_params)
+        
+        
+        partitions = if consistent 
+            Zygote.ignore() do 
+                map(unique(state_dist[info_id])) do infoset
+                    vec(state_dist[info_id] .== infoset)
+                end
+            end
+        else
+            [[i] for i in 1:length(state_dist)]
+        end
+
+        dists = mapreduce(vcat, partitions) do partition
+
+            info_dist = StateDist(
+                state_dist.z[partition, :],
+                state_dist.w[partition],
+                state_dist.ids,
+                state_dist.map
+            )
+
+            weight = exp.(info_dist.w) ./ sum(exp.(info_dist.w))
+
+            belief = sum(info_dist[true_id] .*  weight, dims=1)
+
+            # belief = vec(info_dist[true_id])
+
+
+            alter(info_dist,
+                belief_id => repeat(belief, length(info_dist))
+            )
+        end
+
+        StateDist(
+            vcat([dist.z for dist in dists]...),
+            vcat([dist.w for dist in dists]...),
+            dists[begin].ids,
+            dists[begin].map
         )
-    end 
-    # no point to returning state components here; there are none
-end
+    end
 
+    State(belief_id => m), belief_step
+end

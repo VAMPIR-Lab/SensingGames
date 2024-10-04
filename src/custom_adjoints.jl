@@ -33,3 +33,20 @@ function ChainRules.rrule(
     end
     return y, sum_pullback
 end
+
+function ChainRules.rrule(config::RuleConfig{>:HasReverseMode}, ::typeof(ThreadsX.map), f, X::AbstractArray)
+    hobbits = ThreadsX.map(X) do x  # this makes an array of tuples
+        y, back = rrule_via_ad(config, f, x)
+    end
+    Y = ThreadsX.map(first, hobbits)
+    function map_pullback(dY_raw)
+        dY = unthunk(dY_raw)
+        backevals = ThreadsX.map(hobbits, dY) do (y, back), dy
+            dx, dx = back(dy)
+        end
+        df = ProjectTo(f)(sum(first, backevals))
+        dX = ThreadsX.map(last, backevals)
+        return (NoTangent(), df, dX)
+    end
+    return Y, map_pullback
+end

@@ -14,8 +14,9 @@ using ChainRulesCore
 using JLD2
 
 ## Visualization
-# using Makie, GLMakie
-using Plots
+using GLMakie
+# using Plots
+using Printf
 
 ## Collections management
 # using BlockArrays
@@ -23,19 +24,20 @@ using SparseArrays
 using ThreadsX
 using StaticArrays
 
+# Stats
+using StatsBase
+
 ## Development tools
 using Infiltrator
 using Debugger
 # using Wandb
 using Logging
 
-abstract type Policy end
-abstract type AbstractState end
-abstract type Game end
-
 include("utils.jl")
 include("statespaces.jl")
 include("games.jl")
+include("game_utils.jl")
+include("beliefs.jl")
 include("solvers.jl")
 include("policies.jl")
 include("dynamics.jl")
@@ -47,5 +49,6 @@ include("../examples/meetup.jl")
 # include("../examples/fovtag_planar.jl")
 include("../examples/blurtag.jl")
 include("../examples/fovtag.jl")
+include("../examples/hastag.jl")
 
 end #module
