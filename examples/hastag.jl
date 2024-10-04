@@ -1,3 +1,9 @@
+#   `hastag` is an imperfect information pursuit-evasion game where
+#   each player has a field of view in the direction of their velocity.
+#   When the opponent is within the field of view observations are perfect;
+#   otherwise observations are very noisy (with a steep but smooth transition
+#   in between). There are solid obstacles within the space that block both 
+#   players' line of sight beyond it.
 using Dates
 
 # `fovtag` is an imperfect information pursuit-evasion game where
@@ -18,25 +24,29 @@ using Dates
 
 
 
-function make_fovtag_sensing_step(agent, other; fov, scale=100.0, offset=2)
+function make_hastag_sensing_step(agent, other; fov, scale=100.0, offset=2, block=[0 -20], brad=5)
     id_obs = Symbol("$(agent)_obs")
     id_own_θ = Symbol("$(agent)_θ")
     id_own_pos = Symbol("$(agent)_pos")
     id_other_pos = Symbol("$(other)_pos")
 
-    function get_sensing_noise(dθ)
+    function get_sensing_noise(dθ, cbool)
         d = (fov/2 - abs(dθ))
-        offset + d * ((d > 0) ? (-0.001) : (-scale))
+        offset + d * ((d > 0 && cbool) ? (-0.001) : (-scale))
     end
 
     function get_gaussian_params(state_dist)
         our_pos = state_dist[id_own_pos]
         their_pos = state_dist[id_other_pos]
-
-        θ1 = state_dist[id_own_θ] .+ π
+        θ1 = state_dist[id_own_θ] .+ π 
         θ2 = atan.(our_pos[:, 2] .- their_pos[:, 2], our_pos[:, 1] .- their_pos[:, 1])
+        θ3 = atan.(our_pos[:, 2] .- block[2], our_pos[:, 1] .- block[1])
+        bdist = sqrt.((our_pos[:,1] .- block[1]).^2 .+ (our_pos[:,2] .- block[2]).^2)
+        θbrad = atan.(brad, bdist)
+        dθ2 = abs.(angdiff.(θ3, θ2))
+        uncov = (θbrad < dθ2) && (bdist > sqrt.((our_pos[:,1] .- their_pos[:,1]).^2 .+ (our_pos[:,2] .- their_pos[:,2]).^2))
         dθ = angdiff.(θ1, θ2)
-        σ = get_sensing_noise.(dθ)
+        σ = get_sensing_noise.(dθ, uncov)
         μ = state_dist[id_other_pos]
 
         return μ, σ.^2
@@ -70,7 +80,7 @@ function make_fovtag_sensing_step(agent, other; fov, scale=100.0, offset=2)
     GameComponent(rollout_observation, lik_observation, [id_obs])
 end
 
-function make_fovtag_costs()
+function make_hastag_costs(block=[0 -20], brad=5)
 
     function cost1(hist)
         sum(hist) do distr
@@ -79,22 +89,26 @@ function make_fovtag_costs()
             # b = cost_bound.(l, -1, 40^2)
             b = cost_bound.(distr[:p1_pos], [-40 -40], [40 40])
             r = cost_regularize.(distr[:p1_vω], α=10)
-            sum((b .+ r .+ d) .* exp.(distr.w))
+            bdist = sqrt.((distr[:p1_pos][:,1] .- block[1]).^2 .+ ((distr[:p1_pos])[:,2] .- block[2]).^2)
+            o = -bdist .* ((bdist > brad) ? 0.0001 : 100)
+            sum((b .+ r .+ d .+ o) .* exp.(distr.w))
         end
     end
     function cost2(hist)
         sum(hist) do distr
+            bdist = sqrt.((distr[:p2_pos][:,1] .- block[1]).^2 .+ ((distr[:p2_pos])[:,2] .- block[2]).^2)
             sum((-(sum((distr[:p1_pos] .- distr[:p2_pos]).^2, dims=2)) .+
             cost_bound.(sqrt.(sum((distr[:p2_pos]).^2, dims=2)), [0], [40]) .+
-            cost_regularize.(distr[:p2_vω], α=10)) .*
-            exp.(distr.w))
+            cost_regularize.(distr[:p2_vω], α=10)) .+
+            (-bdist .* ((bdist > brad) ? 0.0001 : 100))) .*
+            exp.(distr.w)
         end
     end
 
     (; p1=cost1, p2=cost2)
 end
 
-function make_fovtag_prior(zero_state; n=16)
+function make_hastag_prior(zero_state; n=16)
     function prior() 
         alter(StateDist(zero_state, n),
             :p1_pos => rand(n, 2)*30 .- 15,
@@ -107,7 +121,7 @@ function make_fovtag_prior(zero_state; n=16)
     end
 end
 
-function test_fovtag()
+function test_hastag()
     T = 5
     fov = (; p1=1.0, p2=1.0)
 
@@ -135,8 +149,8 @@ function test_fovtag()
     p1_bound_step = make_bound_step(:p1_pos, -42, 42)
     p2_bound_step = make_bound_step(:p2_pos, -42, 42)
 
-    p1_obs_step = make_fovtag_sensing_step(:p1, :p2; fov=fov[:p1])
-    p2_obs_step = make_fovtag_sensing_step(:p2, :p1; fov=fov[:p2])
+    p1_obs_step = make_hastag_sensing_step(:p1, :p2; fov=fov[:p1])
+    p2_obs_step = make_hastag_sensing_step(:p2, :p1; fov=fov[:p2])
 
     # TODO - there's some special casing for this example in policies.jl that needs to go
     p1_control_step = make_nn_control(:p1, [:p1_pos_h, :p1_obs_h], :p1_vel, t_max=T)
@@ -154,7 +168,7 @@ function test_fovtag()
 
 
 
-    fovtag_game = ContinuousGame([
+    hastag_game = ContinuousGame([
         clock_step,
         p1_obs_step,       p2_obs_step,
         p1_pos_hist_step,  p2_pos_hist_step,
@@ -167,7 +181,7 @@ function test_fovtag()
 
     # Version of the game where players don't get new information
     #   during planning (no active information gathering)
-    inactive_fovtag_game = ContinuousGame([
+    inactive_hastag_game = ContinuousGame([
         clock_step,
         p1_obs_step,       p2_obs_step,
         p1_pos_hist_step,  p2_pos_hist_step,
@@ -179,15 +193,15 @@ function test_fovtag()
 
 
 
-    prior_fn = make_fovtag_prior(zero_state, n=1000)
-    p1_belief = HybridParticleBelief(fovtag_game, prior_fn(), 0.01)
-    p2_belief = HybridParticleBelief(fovtag_game, prior_fn(), 0.01)
+    prior_fn = make_hastag_prior(zero_state, n=1000)
+    p1_belief = HybridParticleBelief(hastag_game, prior_fn(), 0.1)
+    p2_belief = HybridParticleBelief(hastag_game, prior_fn(), 0.1)
 
     true_state = StateDist([prior_fn()[rand(1:10)]])
     p1_ids = [:t; :p1_pos; :p1_vel; :p1_θ; :p1_obs; :p1_pos_h; :p1_obs_h]
     p2_ids = [:t; :p2_pos; :p2_vel; :p2_θ; :p2_obs; :p2_pos_h; :p2_obs_h]
 
-    cost_fns  = make_fovtag_costs()
+    cost_fns  = make_hastag_costs()
     renderer = MakieRenderer()
 
 
@@ -208,7 +222,7 @@ function test_fovtag()
 
         # Each player solves their game
         iter = 0
-        p1_params = solve(fovtag_game, p1_belief, true_params, cost_fns, optimization_options) do params
+        p1_params = solve(hastag_game, p1_belief, true_params, cost_fns, optimization_options) do params
 
             print(".")
             iter += 1
@@ -219,28 +233,32 @@ function test_fovtag()
             return false
         end
 
-        p2_params = solve(fovtag_game, p2_belief, true_params, cost_fns, optimization_options)
+        p2_params = solve(hastag_game, p2_belief, true_params, cost_fns, optimization_options)
         true_params = (;
             p1 = p1_params[:p1],
             p2 = p2_params[:p2]
         )
 
+        #Run variance numbers
+        #Player 1's beliefs about their position
+        #p1_belief.dist[:p1_pos]
+        #Player 1's beliefs about player 2's position
+        #p1_belief.dist[:p2_pos]
 
-
-        true_state = step(fovtag_game, true_state, true_params)
+        true_state = step(hastag_game, true_state, true_params)
         update(p1_belief, select(true_state, p1_ids...)[1], p1_params)
         update(p2_belief, select(true_state, p2_ids...)[1], p2_params)
 
         # Big assumption: p1_params = p2_params = true_params
-        render_fovtag(renderer, [
+        render_hastag(renderer, [
             (draw(p1_belief; n=20), true_params),
             (true_state, true_params),
             (draw(p2_belief; n=20), true_params)
-            ], fovtag_game, fov; T)
+            ], hastag_game, fov; T)
     end
 end
 
-function render_fovtag(renderer, dists, game, fov; T)
+function render_hastag(renderer, dists, game, fov; T)
 
     unspool_scheme = [
         :p1_pos_h => :p1_pos,
@@ -263,6 +281,7 @@ function render_fovtag(renderer, dists, game, fov; T)
             for i in 1:length(dist)
                 current_state = dist[i]
                 lik = exp(dist.w[i])
+
                 render_location(renderer, current_state, :p1_pos; 
                     ax_idx=(1, col), color=0, alpha=1.0*lik,
                     colormap=p1_colormap, colorrange, markersize=8)
