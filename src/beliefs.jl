@@ -87,7 +87,7 @@ function draw(belief::JointParticleBelief; n)
     draw(belief.dist; n)
 end
 
-function update(belief::JointParticleBelief, ego_state, params)
+function update(belief::JointParticleBelief, params)
     # In this version we don't even care about the ego state
     # This is "technically correct" in that as soon as we use our truego
     #    state in our belief, we diverge from the opponent
