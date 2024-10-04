@@ -24,7 +24,7 @@ using Dates
 
 
 
-function make_hastag_sensing_step(agent, other; fov, scale=100.0, offset=2, block=[0 -35], brad=5)
+function make_hastag_sensing_step(agent, other; fov, scale=100.0, offset=0.5, block=[0 -35], brad=5)
     id_obs = Symbol("$(agent)_obs")
     id_own_θ = Symbol("$(agent)_θ")
     id_own_pos = Symbol("$(agent)_pos")
@@ -308,12 +308,17 @@ function render_hastag(renderer, dists, game, fov; block_pos=(0, -35), block_r=5
                 
                 for (i, state) in enumerate(history)
                     t = i-T
-                    # render_location(renderer, state, :p1_obs; 
-                    #     ax_idx=(1, col), color=t, alpha=1.0 * ((t > 0) ? 0 : 1), marker='x',
-                    #     colormap=p1_colormap, colorrange)
-                    # render_location(renderer, state, :p2_obs; 
-                    #     ax_idx=(1, col), color=t, alpha=1.0 * ((t > 0) ? 0 : 1), marker='x',
-                    #     colormap=p2_colormap, colorrange)
+
+                    # Only plot observations if there are few enough of them
+                    #   that it doesn't get crazy
+                    if length(dist) < 5
+                        render_location(renderer, state, :p1_obs; 
+                            ax_idx=(1, col), color=t, alpha=1.0 * ((t > 0) ? 0 : 1), marker='x',
+                            colormap=p1_colormap, colorrange)
+                        render_location(renderer, state, :p2_obs; 
+                            ax_idx=(1, col), color=t, alpha=1.0 * ((t > 0) ? 0 : 1), marker='x',
+                            colormap=p2_colormap, colorrange)
+                    end
                     render_fov(renderer, state, fov[:p1], :p1_pos, :p1_θ; 
                         ax_idx=(1, col), color=t, alpha=0.1*lik,
                         colormap=p1_colormap, colorrange)
