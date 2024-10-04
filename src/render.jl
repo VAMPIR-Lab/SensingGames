@@ -59,6 +59,20 @@ function render_trajectory(r::MakieRenderer, states::AbstractArray{State}, id; a
     x = @lift([state[id][1] for state in $states])
     y = @lift([state[id][2] for state in $states])
 
+    function get_first_nonzero(v)
+        for k in v
+            if k != 0.0
+                return k
+            end
+        end
+    end
+
+    x_nonzero = @lift(get_first_nonzero($x))
+    y_nonzero = @lift(get_first_nonzero($y))
+
+    x = @lift(map((xx) -> ((xx == 0.0) ? $x_nonzero : xx), $x))
+    y = @lift(map((yy) -> ((yy == 0.0) ? $y_nonzero : yy), $y))
+
     lines!(ax, x, y;
         color, alpha, kwargs...
     )
@@ -68,8 +82,9 @@ function render_trajectory(r::MakieRenderer, states::AbstractArray{State}, id; a
     a_dx = @lift([$x[end] - $x[end-1]])
     a_dy = @lift([$y[end] - $y[end-1]])
 
+
     arrows!(ax, a_x, a_y, a_dx, a_dy;
-        color, alpha, kwargs...
+        color=(:black, alpha), kwargs...
     )
 end
 
@@ -95,21 +110,27 @@ function render_fov(r::MakieRenderer, state::State, fov, id_pos, id_θ; ax_idx,
     isnothing(state) && return
     ax = _get_axis(r, ax_idx)
 
+    pos =   @lift($state[id_pos])
+    # left =  @lift($state[id_θ][1] - fov)
+    # right = @lift($state[id_θ][1] + fov)
+    
+    # arc!(ax, pos, 5, left, right;
+    #     color, alpha, kwargs...)
+
     vertices = @lift(
-        [
-            (
-                $state[id_pos][1], 
-                $state[id_pos][2]
-            ), (
-                $state[id_pos][1] + scale*cos($state[id_θ][1] + fov/2),
-                $state[id_pos][2] + scale*sin($state[id_θ][1] + fov/2)
-            ), (
-                $state[id_pos][1] + scale*cos($state[id_θ][1] - fov/2),
-                $state[id_pos][2] + scale*sin($state[id_θ][1] - fov/2)
-            )
-        ]
+        [($pos[1], $pos[2]); [(
+            $state[id_pos][1] + scale*cos($state[id_θ][1] + k),
+            $state[id_pos][2] + scale*sin($state[id_θ][1] + k)
+        ) for k in (-fov/2):0.1:(fov/2)]]
     )
     poly!(ax, vertices; 
         color, alpha, kwargs...
     )
+end
+
+function render_static_circle(r::MakieRenderer, center, radius; ax_idx, kwargs...)
+    # (center, radius) = _update_observable(r, (center, radius))
+    # isnothing(state) && return
+    ax = _get_axis(r, ax_idx)
+    arc!(ax, center, radius, 0, 2π, color=:black, linestyle=:dot)
 end

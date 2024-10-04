@@ -435,6 +435,7 @@ function render_multitag(renderer, dists, game, players, fov; T)
         for (col, (dist, params)) in enumerate(dists)
 
             plan = step(game, dist, params; n=T)[end]
+            render_static_circle(renderer, (0, 0), 45; ax_idx=(1, col))
 
             for i in 1:length(dist)
                 current_state = dist[i]
