@@ -123,5 +123,4 @@ function update(belief::HybridParticleBelief, ego_state, params)
     # w = log.(exp.(w) ./ sum(exp.(w))) 
 
     belief.dist = StateDist(Z, w, joint_dist.ids, joint_dist.map)
-    @show length(belief.dist)
 end

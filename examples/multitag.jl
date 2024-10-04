@@ -393,12 +393,13 @@ function test_multitag(num_p=2, num_e=2)
     # )
 
     for t in 1:1000
+        print(".")
 
         # <Mel> The do block on `solve` is optional and what had been here was cruft (my bad)
         params = solve(multitag_game, joint_belief, params, cost_fns, optimization_options)
 
         true_state = step(multitag_game, true_state, params)
-        println(true_state)
+
         # Shared brain
         update(joint_belief, params)
 
@@ -412,28 +413,23 @@ function test_multitag(num_p=2, num_e=2)
         #     update(beliefs[e], select(true_state, ids[e]...)[1], params[e])
         # end
         
-        # render_multitag(renderer, [
-        #     (draw(p1_belief; n=20), true_params),
-        #     (true_state, true_params),
-        #     (draw(p2_belief; n=20), true_params)
-        #     ], multitag_game, fov; T)
+        render_multitag(renderer, [
+            (draw(joint_belief; n=20), params),
+            (true_state, params)
+            ], multitag_game, keys(fov), fov; T)
     end
 end
 
-function render_multitag(renderer, dists, game, fov; T)
+function render_multitag(renderer, dists, game, players, fov; T)
 
-    unspool_scheme = [
-        :p1_pos_h => :p1_pos,
-        :p2_pos_h => :p2_pos,
-        :p1_obs_h => :p1_obs,
-        :p2_obs_h => :p2_obs,
-        :p1_θ_h   => :p1_θ,
-        :p2_θ_h   => :p2_θ
-    ]
+    unspool_scheme = mapreduce(vcat, players) do id
+        [
+            Symbol("$(id)_pos_h") => Symbol("$(id)_pos"),
+            Symbol("$(id)_obs_h") => Symbol("$(id)_obs"),
+            Symbol("$(id)_θ_h") => Symbol("$(id)_θ")
+        ]
+    end
 
-    p1_colormap = :linear_blue_5_95_c73_n256
-    p2_colormap = :linear_kry_5_95_c72_n256
-    colorrange = (-T, T)
 
     render(renderer) do
         for (col, (dist, params)) in enumerate(dists)
@@ -444,43 +440,45 @@ function render_multitag(renderer, dists, game, fov; T)
                 current_state = dist[i]
                 lik = exp(dist.w[i])
 
-                render_location(renderer, current_state, :p1_pos; 
-                    ax_idx=(1, col), color=0, alpha=1.0*lik,
-                    colormap=p1_colormap, colorrange, markersize=8)
-                render_location(renderer, current_state, :p2_pos; 
-                    ax_idx=(1, col), color=0, alpha=1.0*lik,
-                    colormap=p2_colormap, colorrange, markersize=8)
+                for (p_num, player) in enumerate(players)
 
+                    id_pos = Symbol("$(player)_pos")
+                    id_θ = Symbol("$(player)_θ")
 
-                past = unspool(current_state, unspool_scheme...)
-                future_particle = plan[i]
-                future = unspool(future_particle, unspool_scheme...)
-                history = [past; future]
-                # history = [past; future[1]]
+                    colormap = if 'p' in String(player)
+                        :linear_blue_5_95_c73_n256
+                    else
+                        :linear_kry_5_95_c72_n256
+                    end
 
-                render_trajectory(renderer, history, :p1_pos; 
-                    ax_idx=(1, col), color=0, alpha=0.5*lik,
-                    colormap=p1_colormap, colorrange)
-                render_trajectory(renderer, history, :p2_pos; 
-                    ax_idx=(1, col), color=0, alpha=0.5*lik,
-                    colormap=p2_colormap, colorrange)
-                
-                for (i, state) in enumerate(history)
-                    t = i-T
-                    # render_location(renderer, state, :p1_obs; 
-                    #     ax_idx=(1, col), color=t, alpha=1.0 * ((t > 0) ? 0 : 1), marker='x',
-                    #     colormap=p1_colormap, colorrange)
-                    # render_location(renderer, state, :p2_obs; 
-                    #     ax_idx=(1, col), color=t, alpha=1.0 * ((t > 0) ? 0 : 1), marker='x',
-                    #     colormap=p2_colormap, colorrange)
-                    render_fov(renderer, state, fov[:p1], :p1_pos, :p1_θ; 
-                        ax_idx=(1, col), color=t, alpha=0.1*lik,
-                        colormap=p1_colormap, colorrange)
-                    render_fov(renderer, state, fov[:p2], :p2_pos, :p2_θ; 
-                        ax_idx=(1, col), color=t, alpha=0.1*lik,
-                        colormap=p2_colormap, colorrange)
+                    colorrange = (-1, length(players)+1)
 
-                    t += 1
+                    render_location(renderer, current_state, id_pos; 
+                        ax_idx=(1, col), color=p_num, alpha=1.0*lik,
+                        colormap, colorrange, markersize=8)
+
+                    past = unspool(current_state, unspool_scheme...)
+                    future_particle = plan[i]
+                    future = unspool(future_particle, unspool_scheme...)
+                    history = [past; future]
+
+                    render_trajectory(renderer, history, id_pos; 
+                        ax_idx=(1, col), color=p_num, alpha=0.5*lik,
+                        colormap, colorrange)
+                    
+                    for (i, state) in enumerate(history)
+                        t = i-T
+                        # render_location(renderer, state, :p1_obs; 
+                        #     ax_idx=(1, col), color=t, alpha=1.0 * ((t > 0) ? 0 : 1), marker='x',
+                        #     colormap=p1_colormap, colorrange)
+                        # render_location(renderer, state, :p2_obs; 
+                        #     ax_idx=(1, col), color=t, alpha=1.0 * ((t > 0) ? 0 : 1), marker='x',
+                        #     colormap=p2_colormap, colorrange)
+                        render_fov(renderer, state, fov[player], id_pos, id_θ; 
+                            ax_idx=(1, col), color=p_num, alpha=0.1*lik,
+                            colormap, colorrange)
+                        t += 1
+                    end
                 end
             end
         end
