@@ -130,21 +130,37 @@ function make_multitag_costs(num_p, num_e)
         p = Symbol("p$(i)")
         p_pos = Symbol("p$(i)_pos")
         p_vω = Symbol("p$(i)_vω")
+        # function cost_p(hist)
+        #     # distr is an element in hist
+        #     sum(hist) do distr
+        #         # d is the squared distances between p1_pos and p2_pos.
+        #         d = 0
+        #         for l = 1:num_e
+        #             e_pos = Symbol("e$(l)_pos")
+        #             d = d .+ sum((distr[p_pos] .- distr[e_pos]).^2, dims=2)
+        #         end
+        #         d = d / num_p
+        #         b = cost_bound.(sqrt.(sum((distr[p_pos]).^2, dims=2)), [0], [40])
+        #         r = cost_regularize.(distr[p_vω], α=10)
+        #         sum((b .+ r .+ d) .* exp.(distr.w))
+        #     end
+        # end
         function cost_p(hist)
             # distr is an element in hist
             sum(hist) do distr
                 # d is the squared distances between p1_pos and p2_pos.
-                d = 0
-                for l = 1:num_e
+                d_list = mapreduce(hcat, collect(1:num_e)) do l
                     e_pos = Symbol("e$(l)_pos")
-                    d = d .+ sum((distr[p_pos] .- distr[e_pos]).^2, dims=2)
+                    sqrt.(sum((distr[p_pos] .- distr[e_pos]).^2, dims=2))
                 end
-                d = d / num_p
-                b = cost_bound.(sqrt.(sum((distr[:p_pos]).^2, dims=2)), [0], [40])
+                d = maximum(d_list, dims=2)
+                b = cost_bound.(sqrt.(sum((distr[p_pos]).^2, dims=2)), [0], [40])
                 r = cost_regularize.(distr[p_vω], α=10)
                 sum((b .+ r .+ d) .* exp.(distr.w))
             end
         end
+        
+
         costs = Base.merge(costs, (p => cost_p,))
     end
 
@@ -163,7 +179,7 @@ function make_multitag_costs(num_p, num_e)
                     d = d .- sum((distr[p_pos] .- distr[e_pos]).^2, dims=2)
                 end
                 d = d / num_p
-                b = cost_bound.(sqrt.(sum((distr[:e_pos]).^2, dims=2)), [0], [40])
+                b = cost_bound.(sqrt.(sum((distr[e_pos]).^2, dims=2)), [0], [40])
                 r = cost_regularize.(distr[e_vω], α=10)
                 sum((b .+ r .+ d) .* exp.(distr.w))
             end
@@ -203,7 +219,7 @@ function make_multitag_prior(zero_state, num_p, num_e; n=16)
 end
 
 function test_multitag(num_p=2, num_e=2)
-    T = 5
+    T = 10
     n_particles=1000
 
     fov = NamedTuple()
@@ -321,7 +337,7 @@ function test_multitag(num_p=2, num_e=2)
         # These are all named tuples (player symbol => func)
         values(obs_step)...,
         values(pos_hist_step)...,
-        values(obs_hist_step)...,
+        # values(obs_hist_step)...,
         values(ang_hist_step)...,
         values(control_step)...,
         values(dyn_step)...,
@@ -417,6 +433,7 @@ function test_multitag(num_p=2, num_e=2)
             (draw(joint_belief; n=20), params),
             (true_state, params)
             ], multitag_game, keys(fov), fov; T)
+        
     end
 end
 
