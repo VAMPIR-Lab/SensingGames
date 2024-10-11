@@ -5,7 +5,7 @@ function solve(callback, game::ContinuousGame, prior_belief, game_params, cost_f
 
     function score(θ, agent)
         # temp = draw(prior_belief; n=options.batch_size)
-        hist = step(game, draw(prior_belief; n=options.batch_size), θ, n=options.n_lookahead)
+        hist = step(game, draw(prior_belief; n=options.batch_size) |> gpu, θ, n=options.n_lookahead)
         cost_fns[agent](hist)
     end
 

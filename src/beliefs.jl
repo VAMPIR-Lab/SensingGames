@@ -101,11 +101,13 @@ mutable struct HybridParticleBelief
 end
 
 function draw(belief::HybridParticleBelief; n)
-    draw(belief.dist; n)
+    Zygote.ignore() do
+        draw(belief.dist; n)
+    end
 end
 
 function update(belief::HybridParticleBelief, ego_state, params)
-    
+
     N = length(belief.dist)
     γ = belief.γ
     c = Int(floor(γ*N))

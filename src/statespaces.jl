@@ -11,7 +11,7 @@ using StatsBase
 using Base: ImmutableDict
 
 struct State
-    z::Vector{Float64}
+    z::AbstractArray{Float32}
     ids::Vector{Symbol}
     map::ImmutableDict{Symbol, UnitRange{Int}}
 end
@@ -29,10 +29,10 @@ function State(semantics::Pair{Symbol, Int}...)
 
     map = foldl(merge, 1:length(semantics), init=ImmutableDict{Symbol, UnitRange{Int}}()) 
 
-    State(zeros(end_ids[end]), ids, map)
+    State(zeros(end_ids[end]) |> gpu, ids, map)
 end
 
-function State(init_pairs::Pair{Symbol, Vector{Float64}}...)
+function State(init_pairs::Pair{Symbol, <: AbstractArray{Float32}}...)
 
     pairs = [s => length(v) for (s, v) in init_pairs]
     state = State(pairs...)
@@ -43,15 +43,15 @@ function Base.size(s::State)
     Base.size(s.z)
 end
 
-function Base.getindex(s::State, i::Int)::Vector{Float64}
+function Base.getindex(s::State, i::Int)::Vector{Float32}
     s.z[i]
 end
 
-function Base.getindex(s::State, q::Symbol)::Vector{Float64}
+function Base.getindex(s::State, q::Symbol)::Vector{Float32}
     s.z[s.map[q]]
 end
 
-function Base.getindex(s::State, I::Vararg{Int})::Vector{Float64}
+function Base.getindex(s::State, I::Vararg{Int})::Vector{Float32}
     s.z[I...]
 end
 
@@ -65,11 +65,11 @@ function Base.length(s::State)
     length(s.z)
 end
 
-function alter(state::State, substitutions::Pair{Symbol, Vector{Float64}}...)::State
+function alter(state::State, substitutions::Pair{Symbol, Vector{Float32}}...)::State
     dict = Dict(substitutions...)
-    z::Vector{Float64} = mapreduce(vcat, state.ids) do id::Symbol
+    z::Vector{Float32} = mapreduce(vcat, state.ids) do id::Symbol
         if id in keys(dict)
-            dict[id]
+            dict[id] |> gpu
         else
             state[id]
         end
@@ -122,6 +122,21 @@ function unspool(state::State, pairs...)
     end)
 end
 
+function Flux.gpu(s::State)
+    State(
+        s.z |> gpu,
+        s.ids,
+        s.map
+    )
+end
+
+function Flux.cpu(s::State)
+    State(
+        s.z |> cpu,
+        s.ids,
+        s.map
+    )
+end
 
 
 
@@ -130,16 +145,16 @@ end
 # ids are the components of a State
 # map gives the index range for ids
 struct StateDist
-    z::Matrix{Float64}
-    w::Vector{Float64}
+    z::AbstractArray{Float32}
+    w::AbstractArray{Float32}
     ids::Vector{Symbol}
     map::ImmutableDict{Symbol, UnitRange{Int}}
 end
 
 function StateDist(state::State, n::Int64)
     StateDist(
-        Base.repeat(state.z', n),
-        log.(1/n * ones(n)),
+        Base.repeat(state.z', n) |> gpu,
+        log.(1/n * ones(n)) |> gpu,
         state.ids,
         state.map
     )
@@ -148,8 +163,8 @@ end
 function StateDist(states::AbstractArray{State})
     zs = [s.z' for s in states]
     StateDist(
-        reduce(vcat, zs),
-        fill(-log(length(states)), length(states)),
+        reduce(vcat, zs) |> gpu,
+        fill(-log(length(states)), length(states)) |> gpu,
         states[begin].ids,
         states[begin].map
     )
@@ -163,7 +178,7 @@ function Base.getindex(s::StateDist, i::Union{Int, Colon, UnitRange{Int}})
     State(s.z[i, :], s.ids, s.map)
 end
 
-function Base.getindex(s::StateDist, q::Symbol)::Matrix{Float64}
+function Base.getindex(s::StateDist, q::Symbol)
     s.z[:, s.map[q]]
 end
 
@@ -185,13 +200,13 @@ function expectation(f, s::StateDist)
     end
 end
 
-function alter(state::StateDist, substitutions::Pair{Symbol, Matrix{Float64}}...)::StateDist
+function alter(state::StateDist, substitutions::Pair...)::StateDist
     
     z_buf = Zygote.Buffer(state.z)
     z_buf[:, :] = state.z
 
     for (id, v) in substitutions
-        z_buf[:, state.map[id]] = v
+        z_buf[:, state.map[id]] = Float32.(v) |> gpu
     end
 
     StateDist(copy(z_buf), state.w, state.ids, state.map)
@@ -209,7 +224,7 @@ function select(state_dist::StateDist, ids::Symbol...)
 end
 
 function reweight(state::StateDist, weights)
-    StateDist(state.z, weights, state.ids, state.map)
+    StateDist(state.z |> gpu, weights |> gpu, state.ids, state.map)
 end
 
 function draw(dist::StateDist; n=1, as_dist=true, reweight=true, weight=true)
@@ -282,6 +297,26 @@ function Base.show(io::IO, ::MIME"text/plain", s::State)
 end
 
 
+function Flux.gpu(s::StateDist)
+    StateDist(
+        s.z |> gpu,
+        s.w |> gpu,
+        s.ids,
+        s.map
+    )
+end
+
+
+function Flux.cpu(s::StateDist)
+    StateDist(
+        s.z |> cpu,
+        s.w |> cpu,
+        s.ids,
+        s.map
+    )
+end
+
+
 # When state spaces get more particles 
 #   (as a result of e.g. cross dynamics)
 #   the history can have inconsistent numbers 
@@ -299,6 +334,6 @@ end
 
 Zygote.@adjoint State(semantics...) = State(semantics...), _ -> (nothing)
 Zygote.@adjoint State(z::AbstractVector, ids, map) = State(z, ids, map), p -> (p.z, nothing, nothing)
-Zygote.@adjoint StateDist(z::Matrix{Float64}, map) = StateDist(z, map), p -> (p.z, nothing)
+Zygote.@adjoint StateDist(z, map) = StateDist(z, map), p -> (p.z, nothing)
 
 

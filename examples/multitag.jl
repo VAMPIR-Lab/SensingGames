@@ -245,7 +245,7 @@ function test_multitag(num_p=2, num_e=2)
 
             optimization_options = (;
                 n_lookahead = T,
-                n_iters = 20,
+                n_iters = 1,
                 batch_size = 5,
                 max_wall_time = 120000, # Not respected right now
                 steps_per_seed = 1,

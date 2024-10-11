@@ -35,7 +35,7 @@ function make_fovtag_sensing_step(agent, other; fov, scale=100.0, offset=2)
         θ1 = state_dist[id_own_θ] .+ π
         θ2 = atan.(our_pos[:, 2] .- their_pos[:, 2], our_pos[:, 1] .- their_pos[:, 1])
         dθ = angdiff.(θ1, θ2)
-        σ = get_sensing_noise.(dθ)
+        σ = Float32.(get_sensing_noise.(dθ))
         μ = state_dist[id_other_pos]
 
         return μ, σ.^2
@@ -43,10 +43,21 @@ function make_fovtag_sensing_step(agent, other; fov, scale=100.0, offset=2)
 
     function rollout_observation(state_dist::StateDist, game_params)
         μ, σ2 = get_gaussian_params(state_dist)   
-        obs = sample_trimmed_gauss.(μ, σ2; l=-40, u=40)
+        quantile = rand(length(state_dist), 2) |> gpu
+        # obs = sample_trimmed_gauss.(μ, σ2, -40, 40, quantile)
+
+        # new_quantile = if σ2 > σ_trim^2
+        #     prc1 = gauss_cdf.(μ, σ2, l)
+        #     prc2 = gauss_cdf.(μ, σ2, u)
+        #     prc1 .+ quantile.*(prc2 .- prc1)
+        # else
+        #     quantile
+        # end
+
+        obs = log.(1 ./ quantile .- 1) .* sqrt.(σ2) ./ -1.702 .+ μ
 
         alter(state_dist, 
-            id_obs => obs
+            id_obs => 0*obs
         )
     end
 
@@ -58,14 +69,12 @@ function make_fovtag_sensing_step(agent, other; fov, scale=100.0, offset=2)
         # sigma: (|dist| x 1) => (|dist| x 1 x 1)
         # x:     (|info| x 2) => (1 x |info| x 2)
         μ = reshape(μ, (length(state_dist), 1, 2))
-        println(size(μ))
         σ2 = reshape(σ2, (length(state_dist), 1, 1))
-        println(size(σ2))
         x = reshape(x, (1, length(compare_dist), 2))
-        println(size(x))
 
         # Note that we use the true Gaussian PDF (not the trimmed one)
-        p = prod(SensingGames.gauss_pdf.(x, μ, σ2), dims=3)
+        q = exp.(-0.5 *(x .- μ).^2 ./ σ2) ./ sqrt.(2π .* σ2)
+        p = prod(q, dims=3)
         log.(p .+ 1e-10)
     end
 
@@ -74,27 +83,32 @@ end
 
 function make_fovtag_costs()
 
+    function cost_bound(d)
+        dg = (d .> 40^2)
+        dl = (d .< 40^2)
+        k = (dl .* (-0.001*d)) .+ (dg .* d.^4)
+    end
+
     function cost1(hist)
         sum(hist) do distr
-            d = (sum((distr[:p1_pos] .- distr[:p2_pos]).^2, dims=2))
-            l = sum((distr[:p1_pos]).^2, dims=2)
-            # b = cost_bound.(l, -1, 40^2)
-            b = cost_bound.(distr[:p1_pos], [-40 -40], [40 40])
-            r = cost_regularize.(distr[:p1_vω], α=10)
-            sum((b .+ r .+ d) .* exp.(distr.w))
+            sum((
+                (sum((distr[:p1_pos] .- distr[:p2_pos]).^2, dims=2)) .+
+                cost_bound(sqrt.(sum((distr[:p1_pos]).^2, dims=2)))
+            ) .* exp.(distr.w))
         end
     end
     function cost2(hist)
         sum(hist) do distr
-            sum((-(sum((distr[:p1_pos] .- distr[:p2_pos]).^2, dims=2)) .+
-            cost_bound.(sqrt.(sum((distr[:p2_pos]).^2, dims=2)), [0], [40]) .+
-            cost_regularize.(distr[:p2_vω], α=10)) .*
-            exp.(distr.w))
+            sum((
+                -(sum((distr[:p1_pos] .- distr[:p2_pos]).^2, dims=2)) .+
+                cost_bound(sqrt.(sum((distr[:p2_pos]).^2, dims=2)))
+            ) .* exp.(distr.w))
         end
     end
 
     (; p1=cost1, p2=cost2)
 end
+
 
 function make_fovtag_prior(zero_state; n=16)
     function prior() 
@@ -115,8 +129,8 @@ function test_fovtag()
 
     optimization_options = (;
         n_lookahead = T,
-        n_iters = 1,
-        batch_size = 20,
+        n_iters = 10,
+        batch_size = 200,
         max_wall_time = 120000, # Not respected right now
         steps_per_seed = 1,
         steps_per_render = 10
@@ -184,6 +198,8 @@ function test_fovtag()
     prior_fn = make_fovtag_prior(zero_state, n=1000)
     p1_belief = HybridParticleBelief(fovtag_game, prior_fn(), 0.01)
     p2_belief = HybridParticleBelief(fovtag_game, prior_fn(), 0.01)
+
+    # @show typeof(p1_belief.dist)
 
     true_state = StateDist([prior_fn()[rand(1:100)]])
     p1_ids = [:t; :p1_pos; :p1_vel; :p1_θ; :p1_obs; :p1_pos_h; :p1_obs_h]
@@ -262,19 +278,20 @@ function render_fovtag(renderer, dists, game, fov; T)
             plan = step(game, dist, params; n=T)[end]
 
             for i in 1:length(dist)
-                current_state = dist[i]
-                lik = exp(dist.w[i])
+                current_state = cpu(dist[i])
+                w = cpu(dist.w)
+                lik = exp(w[i])
 
-                render_location(renderer, current_state, :p1_pos; 
-                    ax_idx=(1, col), color=0, alpha=1.0*lik,
-                    colormap=p1_colormap, colorrange, markersize=8)
-                render_location(renderer, current_state, :p2_pos; 
-                    ax_idx=(1, col), color=0, alpha=1.0*lik,
-                    colormap=p2_colormap, colorrange, markersize=8)
+                # render_location(renderer, current_state, :p1_pos; 
+                #     ax_idx=(1, col), color=0, alpha=1.0*lik,
+                #     colormap=p1_colormap, colorrange, markersize=8)
+                # render_location(renderer, current_state, :p2_pos; 
+                #     ax_idx=(1, col), color=0, alpha=1.0*lik,
+                #     colormap=p2_colormap, colorrange, markersize=8)
 
 
                 past = unspool(current_state, unspool_scheme...)
-                future_particle = plan[i]
+                future_particle = plan[i] |> cpu
                 future = unspool(future_particle, unspool_scheme...)
                 history = [past; future]
                 # history = [past; future[1]]

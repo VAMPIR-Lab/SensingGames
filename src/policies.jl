@@ -7,7 +7,7 @@ Flux.@layer HistPolicy
 
 function make_nn_control(agent, id_input, id_output; t_max=7)
     function control(dist, game_params)
-        t = Int(dist[:t][1])
+        # t = Int(dist[:t][1])
         # T = min(t, t_max)
         history = dist[id_input]
 
@@ -31,11 +31,11 @@ end
 function make_policy(n_input, n_output; t_max=7)
     HistPolicy([
         f64(Chain(
-            Dense(n_input*t => 32, relu),
-            Dense(32 => 64, relu),
-            Dense(64 => 64, relu),
-            Dense(64 => 32, relu),
-            Dense(32 => n_output)
+            Dense(n_input*t => 32, relu) |> gpu,
+            Dense(32 => 64, relu) |> gpu,
+            Dense(64 => 64, relu) |> gpu,
+            Dense(64 => 32, relu) |> gpu,
+            Dense(32 => n_output) |> gpu
         )) for t in 1:t_max]
     )
 end

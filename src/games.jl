@@ -16,27 +16,24 @@ end
 function GameComponent(rollout_fn, output_ids)
     GameComponent(
         rollout_fn,
-        (state_in, state_out, params) -> ones(length(state_in)),
+        (state_in, state_out, params) -> (ones(length(state_in)) |> gpu),
         output_ids
     )
 end
 
-function step(g::ContinuousGame, initial_state, game_params; n)
+function step(g::ContinuousGame, initial_state, game_params; n=1)
     state = initial_state
     hist = [state]
 
     for t in 1:n
         for component in g.components
+            # Zygote.ignore(() -> println(String(Symbol(component))))
             state = component.rollout_fn(state, game_params)
         end
         hist = [hist; state]
     end
     
-    hist
-end
-
-function step(g::ContinuousGame, initial_state, game_params)
-    step(g, initial_state, game_params; n=1)[end]
+    (n == 1) ? hist[end] : hist
 end
 
 function step(g::ContinuousGame, initial_dist::StateDist, ground_state::State, game_params; normalize=true)
