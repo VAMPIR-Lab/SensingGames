@@ -24,7 +24,7 @@ using Dates
 
 
 
-function make_hastag_sensing_step(agent, other; fov, scale=100.0, offset=0.5, block=[0 -35], brad=5)
+function make_hastag_sensing_step(agent, other; fov, scale=100.0, offset=0.5, blocks=[[0 -35], [0 35]], brads=[5, 5])
     id_obs = Symbol("$(agent)_obs")
     id_own_θ = Symbol("$(agent)_θ")
     id_own_pos = Symbol("$(agent)_pos")
@@ -38,13 +38,41 @@ function make_hastag_sensing_step(agent, other; fov, scale=100.0, offset=0.5, bl
     function get_gaussian_params(state_dist)
         our_pos = state_dist[id_own_pos]
         their_pos = state_dist[id_other_pos]
-        θ1 = state_dist[id_own_θ] .+ π 
+        # fov and x axis
+        θ1 = state_dist[id_own_θ] .+ π
+        # two players, and x axis
         θ2 = atan.(our_pos[:, 2] .- their_pos[:, 2], our_pos[:, 1] .- their_pos[:, 1])
-        θ3 = atan.(our_pos[:, 2] .- block[2], our_pos[:, 1] .- block[1])
-        bdist = sqrt.((our_pos[:,1] .- block[1]).^2 .+ (our_pos[:,2] .- block[2]).^2)
-        θbrad = atan.(brad, bdist)
-        dθ2 = abs.(angdiff.(θ3, θ2))
-        uncov = (θbrad < dθ2) && (bdist > sqrt.((our_pos[:,1] .- their_pos[:,1]).^2 .+ (our_pos[:,2] .- their_pos[:,2]).^2))
+        # us to center of obs, and x axis
+        # θ3 = atan.(our_pos[:, 2] .- block[2], our_pos[:, 1] .- block[1])
+        θ3 = mapreduce(hcat, collect(1:size(brads, 1))) do i
+            atan.(our_pos[:, 2] .- blocks[i][2], our_pos[:, 1] .- blocks[i][1])
+        end
+        # println(size(θ3))
+        # distance between us and obs
+        # bdist = sqrt.((our_pos[:,1] .- block[1]).^2 .+ (our_pos[:,2] .- block[2]).^2)
+        bdist = mapreduce(hcat, collect(1:size(brads, 1))) do i
+            sqrt.((our_pos[:,1] .- blocks[i][1]).^2 .+ (our_pos[:,2] .- blocks[i][2]).^2)
+        end
+        # println(size(bdist))
+        # us to the center of obs, and us to the tangent of obs
+        # θbrad = atan.(brad, bdist)
+        θbrad = mapreduce(hcat, collect(1:size(brads, 1))) do i
+            atan.(brads[i], bdist[:, i])
+        end
+        # println(size(θbrad))
+        # dθ2 = abs.(angdiff.(θ3, θ2))
+        dθ2 = mapreduce(hcat, collect(1:size(brads, 1))) do i
+            abs.(angdiff.(θ3[:, i], θ2))
+        end
+        # println(size(dθ2))
+        uncov = all(collect(1:size(brads, 1))) do i
+            (θbrad[:, i] < dθ2[:, i]) || (bdist[:, i] > sqrt.((our_pos[:,1] .- their_pos[:,1]).^2 .+ (our_pos[:,2] .- their_pos[:,2]).^2))
+        end
+        
+        # if !uncov
+        #     println(uncov)
+        # end
+        # uncov = (θbrad < dθ2) || (bdist > sqrt.((our_pos[:,1] .- their_pos[:,1]).^2 .+ (our_pos[:,2] .- their_pos[:,2]).^2))
         dθ = angdiff.(θ1, θ2)
         σ = get_sensing_noise.(dθ, uncov)
         μ = state_dist[id_other_pos]
@@ -80,27 +108,42 @@ function make_hastag_sensing_step(agent, other; fov, scale=100.0, offset=0.5, bl
     GameComponent(rollout_observation, lik_observation, [id_obs])
 end
 
-function make_hastag_costs(block=[0 -35], brad=5)
+function make_hastag_costs(blocks=[[0 -35], [0 35]], brads=[5, 5])
 
-    function cost_obstacle(d)
+    function cost_obstacle(d, brad)
         (d > brad) ? -0.001*(d-brad) : -1000*(d-brad)
     end
 
     function cost1(hist)
         sum(hist) do distr
+            cost_each_obstacle = mapreduce(hcat, collect(1:size(brads, 1))) do i
+                cost_obstacle.(sqrt.(sum((distr[:p1_pos] .- blocks[i]).^2, dims=2)), brads[i])
+            end
+            total_cost_obstacle = sum(cost_each_obstacle, dims=2)
+            # total_cost_obstacle = mapreduce(i -> cost_obstacle.(sqrt.(sum((distr[:p1_pos] .- blocks[i]).^2, dims=2)), brads[i]), +, 1:size(brads, 1))
             sum((
-                (sum((distr[:p1_pos] .- distr[:p2_pos]).^2, dims=2)) .+
+                sum((distr[:p1_pos] .- distr[:p2_pos]).^2, dims=2) .+
                 cost_bound.(sqrt.(sum((distr[:p1_pos]).^2, dims=2)), [0], [40]) .+
-                cost_obstacle.(sqrt.(sum((distr[:p1_pos] .- block).^2, dims=2)))
+                total_cost_obstacle
+                # cost_obstacle.(sqrt.(sum((distr[:p1_pos] .- blocks[1]).^2, dims=2)), brads[1]) .+
+                # cost_obstacle.(sqrt.(sum((distr[:p1_pos] .- blocks[2]).^2, dims=2)), brads[2])
             ) .* exp.(distr.w))
         end
     end
     function cost2(hist)
         sum(hist) do distr
+            cost_each_obstacle = mapreduce(hcat, collect(1:size(brads, 1))) do i
+                cost_obstacle.(sqrt.(sum((distr[:p2_pos] .- blocks[i]).^2, dims=2)), brads[i])
+            end
+            total_cost_obstacle = sum(cost_each_obstacle, dims=2)
+            # total_cost_obstacle = mapreduce(i -> cost_obstacle.(sqrt.(sum((distr[:p2_pos] .- blocks[i]).^2, dims=2)), brads[i]), +, 1:size(brads, 1))
+            
             sum((
-                -(sum((distr[:p1_pos] .- distr[:p2_pos]).^2, dims=2)) .+
+                -sum((distr[:p1_pos] .- distr[:p2_pos]).^2, dims=2) .+
                 cost_bound.(sqrt.(sum((distr[:p2_pos]).^2, dims=2)), [0], [40]) .+
-                cost_obstacle.(sqrt.(sum((distr[:p2_pos] .- block).^2, dims=2)))
+                total_cost_obstacle
+                # cost_obstacle.(sqrt.(sum((distr[:p2_pos] .- blocks[1]).^2, dims=2)), brads[1]) .+
+                # cost_obstacle.(sqrt.(sum((distr[:p2_pos] .- blocks[2]).^2, dims=2)), brads[2])
             ) .* exp.(distr.w))
         end
     end
@@ -280,6 +323,7 @@ function render_hastag(renderer, dists, game, fov; block_pos=(0, -35), block_r=5
 
             render_static_circle(renderer, (0, 0), 45; ax_idx=(1, col))            
             render_static_circle(renderer, block_pos, block_r; ax_idx=(1, col))
+            render_static_circle(renderer, (0, 35), block_r; ax_idx=(1, col))
 
             for i in 1:length(dist)
                 current_state = dist[i]

@@ -13,7 +13,18 @@ function make_vel_dynamics_step(agent::Symbol; dt=1.0, control_scale=1.0)
     function dynamics(state::StateDist, game_params)
         
         vel = state[id_vel]
-        pos = state[id_pos] + dt*vel * control_scale
+        # println(1111111111111)
+        # println(vel[1, :])
+        orig_pos = state[id_pos]
+        # println(orig_pos[1, :])
+        # println(dt)
+        # println(control_scale)
+
+        pos = orig_pos + dt*vel * control_scale
+        # println(pos[1, :])
+        # println(vel[1,2])
+        # println(vel[1,1])
+        # println(atan(vel[1, 2], vel[1, 1]))
 
         # telepos = 60 * rand(size(pos)...) .- 30
         # pos = pos .+ round.(rand(size(pos)...) .- 0.48) .* telepos

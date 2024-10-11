@@ -50,7 +50,7 @@ function step(g::ContinuousGame, initial_dist::StateDist, ground_state::State, g
     ground_dist = StateDist(ground_state, length(state_dist))
     ground_dist_single = StateDist([ground_state])
 
-    @show ground_dist.ids
+    # @show ground_dist.ids
 
 
 
