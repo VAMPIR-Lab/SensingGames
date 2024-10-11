@@ -18,7 +18,7 @@ using Dates
 
 
 
-function make_fovtag_sensing_step(agent, other; fov, scale=100.0, offset=2)
+function make_fovtag_sensing_step(agent, other; fov, scale=20.0, offset=2)
     id_obs = Symbol("$(agent)_obs")
     id_own_θ = Symbol("$(agent)_θ")
     id_own_pos = Symbol("$(agent)_pos")
@@ -41,23 +41,27 @@ function make_fovtag_sensing_step(agent, other; fov, scale=100.0, offset=2)
         return μ, σ.^2
     end
 
+    # function trim_quantile(q, μ, σ2, l, u)
+    #     new_quantile = if σ2 > 5^2
+    #         prc1 = gauss_cdf.(μ, σ2, l)
+    #         prc2 = gauss_cdf.(μ, σ2, u)
+    #         prc1 .+ quantile.*(prc2 .- prc1)
+    #     else
+    #         quantile
+    #     end
+    # end
+
     function rollout_observation(state_dist::StateDist, game_params)
         μ, σ2 = get_gaussian_params(state_dist)   
         quantile = rand(length(state_dist), 2) |> gpu
         # obs = sample_trimmed_gauss.(μ, σ2, -40, 40, quantile)
 
-        # new_quantile = if σ2 > σ_trim^2
-        #     prc1 = gauss_cdf.(μ, σ2, l)
-        #     prc2 = gauss_cdf.(μ, σ2, u)
-        #     prc1 .+ quantile.*(prc2 .- prc1)
-        # else
-        #     quantile
-        # end
+        # quantile = trim_quantile.(quantile, μ, σ2, -40, 40)
 
         obs = log.(1 ./ quantile .- 1) .* sqrt.(σ2) ./ -1.702 .+ μ
 
         alter(state_dist, 
-            id_obs => 0*obs
+            id_obs => obs
         )
     end
 
@@ -84,16 +88,17 @@ end
 function make_fovtag_costs()
 
     function cost_bound(d)
-        dg = (d .> 40^2)
-        dl = (d .< 40^2)
-        k = (dl .* (-0.001*d)) .+ (dg .* d.^4)
+        dd = (d .- 40^2)
+        dg = (dd .> 0)
+        dl = (dd .< 0)
+        k = (dl .* (0.1*d)) .+ (dg .* d.^4)
     end
 
     function cost1(hist)
         sum(hist) do distr
             sum((
                 (sum((distr[:p1_pos] .- distr[:p2_pos]).^2, dims=2)) .+
-                cost_bound(sqrt.(sum((distr[:p1_pos]).^2, dims=2)))
+                cost_bound(sum((distr[:p1_pos]).^2, dims=2))
             ) .* exp.(distr.w))
         end
     end
@@ -101,7 +106,7 @@ function make_fovtag_costs()
         sum(hist) do distr
             sum((
                 -(sum((distr[:p1_pos] .- distr[:p2_pos]).^2, dims=2)) .+
-                cost_bound(sqrt.(sum((distr[:p2_pos]).^2, dims=2)))
+                cost_bound(sum((distr[:p2_pos]).^2, dims=2))
             ) .* exp.(distr.w))
         end
     end
@@ -129,7 +134,7 @@ function test_fovtag()
 
     optimization_options = (;
         n_lookahead = T,
-        n_iters = 10,
+        n_iters = 1,
         batch_size = 200,
         max_wall_time = 120000, # Not respected right now
         steps_per_seed = 1,
@@ -278,7 +283,7 @@ function render_fovtag(renderer, dists, game, fov; T)
             plan = step(game, dist, params; n=T)[end]
 
             for i in 1:length(dist)
-                current_state = cpu(dist[i])
+                current_state = dist[i] |> cpu
                 w = cpu(dist.w)
                 lik = exp(w[i])
 
