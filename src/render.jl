@@ -132,5 +132,5 @@ function render_static_circle(r::MakieRenderer, center, radius; ax_idx, kwargs..
     # (center, radius) = _update_observable(r, (center, radius))
     # isnothing(state) && return
     ax = _get_axis(r, ax_idx)
-    arc!(ax, center, radius, 0, 2π, color=:black, linestyle=:dot)
+    arc!(ax, Tuple(center), radius, 0, 2π, color=:black, linestyle=:dot)
 end
