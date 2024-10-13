@@ -268,7 +268,7 @@ function test_hastag()
         iter = 0
         p1_params = solve(hastag_game, p1_belief, true_params, cost_fns, optimization_options) do params
 
-            print(".")
+            # print(".")
             iter += 1
             if iter % optimization_options.steps_per_render != 0
                 return false
@@ -305,26 +305,29 @@ end
 function test_hastag_active_info_gathering()
     open("results.txt", "w") do io
         for (p1_solver, p2_solver) in [
-            (:active, :active),
+            # (:active, :active),
             # (:inactive, :active),
             # (:active, :inactive),
-            (:inactive, :inactive)]
+            (:inactive, :inactive)
+            ]
 
             println(io, "=======\nP1 $p1_solver, P2 $p2_solver")
-            for s in 1:2
+            println("=======\nP1 $p1_solver, P2 $p2_solver")
+            for s in 1:20
                 Random.seed!(42+s)
 
-                T = 7
+                T = 6
                 fov = (; p1=1.0, p2=1.0)
 
                 optimization_options = (;
                     n_lookahead = T,
-                    n_iters = 100,
+                    n_iters = 10,
                     batch_size = 10,
                     max_wall_time = 120000, # Not respected right now
                     steps_per_seed = 1,
                     steps_per_render = 10
                 )
+                renderer = MakieRenderer()
 
                 clock_step = make_clock_step(1.0)
 
@@ -387,8 +390,8 @@ function test_hastag_active_info_gathering()
 
 
                 prior_fn = make_hastag_prior(zero_state, n=1000)
-                p1_belief = HybridParticleBelief(hastag_game, prior_fn(), 0.1)
-                p2_belief = HybridParticleBelief(hastag_game, prior_fn(), 0.1)
+                p1_belief = HybridParticleBelief(hastag_game, prior_fn(), 0.01)
+                p2_belief = HybridParticleBelief(hastag_game, prior_fn(), 0.01)
 
                 true_state = StateDist([prior_fn()[rand(1:10)]])
                 p1_ids = [:t; :p1_pos; :p1_vel; :p1_θ; :p1_obs; :p1_pos_h; :p1_obs_h]
@@ -412,15 +415,16 @@ function test_hastag_active_info_gathering()
 
                 scores = []
 
-                n_steps = 20
+                n_steps = 40
 
                 for t in 1:n_steps
+                    # print(t)
 
                     # Each player solves their game
                     iter = 0
                     p1_params = solve(planning_hastag_game, p1_belief, true_params, cost_fns, optimization_options) do params
             
-                        # print(".")
+                        print(".")
                         iter += 1
                         if iter % optimization_options.steps_per_render != 0
                             return false
@@ -446,8 +450,14 @@ function test_hastag_active_info_gathering()
                     update!(p2_belief, select(true_state, p2_ids...)[1], true_params)
                     scores = [scores; dist(true_state[1][:p1_pos], true_state[1][:p2_pos])]
                     
+                    render_hastag(renderer, [
+                        # (draw(p1_belief; n=20), true_params),
+                        (true_state, true_params),
+                        # (draw(p2_belief; n=20), true_params)
+                        ], hastag_game, fov; T)
                 end
                 println(io, sum(scores)/n_steps)
+                println(sum(scores)/n_steps)
             end
         end
     end
@@ -464,8 +474,6 @@ function render_hastag(renderer, dists, game, fov; block_pos=de_blocks, block_r=
         :p2_θ_h   => :p2_θ
     ]
 
-    p1_colormap = :linear_blue_5_95_c73_n256
-    p2_colormap = :linear_kry_5_95_c72_n256
     colorrange = (-T, T)
 
     render(renderer) do
@@ -482,13 +490,6 @@ function render_hastag(renderer, dists, game, fov; block_pos=de_blocks, block_r=
                 current_state = dist[i]
                 lik = exp(dist.w[i])
 
-                render_location(renderer, current_state, :p1_pos; 
-                    ax_idx=(1, col), color=0, alpha=1.0*lik,
-                    colormap=p1_colormap, colorrange, markersize=8)
-                render_location(renderer, current_state, :p2_pos; 
-                    ax_idx=(1, col), color=0, alpha=1.0*lik,
-                    colormap=p2_colormap, colorrange, markersize=8)
-
 
                 past = unspool(current_state, unspool_scheme...)
                 future_particle = plan[i]
@@ -497,11 +498,9 @@ function render_hastag(renderer, dists, game, fov; block_pos=de_blocks, block_r=
                 # history = [past; future[1]]
 
                 render_trajectory(renderer, history, :p1_pos; 
-                    ax_idx=(1, col), color=0, alpha=0.5*lik,
-                    colormap=p1_colormap, colorrange)
+                    ax_idx=(1, col), color=:blue, alpha=lik, linewidth=4)
                 render_trajectory(renderer, history, :p2_pos; 
-                    ax_idx=(1, col), color=0, alpha=0.5*lik,
-                    colormap=p2_colormap, colorrange)
+                    ax_idx=(1, col), color=:red, alpha=lik, linewidth=4)
                 
                 for (i, state) in enumerate(history)
                     t = i-T
@@ -510,21 +509,23 @@ function render_hastag(renderer, dists, game, fov; block_pos=de_blocks, block_r=
                     #   that it doesn't get crazy
                     if length(dist) < 5
                         render_location(renderer, state, :p1_obs; 
-                            ax_idx=(1, col), color=t, alpha=1.0 * ((t > 0) ? 0 : 1), marker='x',
-                            colormap=p1_colormap, colorrange)
+                            ax_idx=(1, col), color=:blue, alpha=1.0 * ((t > 0) ? 0 : 1), marker='x', markersize=16)
                         render_location(renderer, state, :p2_obs; 
-                            ax_idx=(1, col), color=t, alpha=1.0 * ((t > 0) ? 0 : 1), marker='x',
-                            colormap=p2_colormap, colorrange)
+                            ax_idx=(1, col), color=:red, alpha=1.0 * ((t > 0) ? 0 : 1), marker='x', markersize=16)
                     end
                     render_fov(renderer, state, fov[:p1], :p1_pos, :p1_θ; 
-                        ax_idx=(1, col), color=t, alpha=0.1*lik,
-                        colormap=p1_colormap, colorrange)
+                        ax_idx=(1, col), color=:blue, alpha=0.1*lik)
                     render_fov(renderer, state, fov[:p2], :p2_pos, :p2_θ; 
-                        ax_idx=(1, col), color=t, alpha=0.1*lik,
-                        colormap=p2_colormap, colorrange)
+                        ax_idx=(1, col), color=:red, alpha=0.1*lik)
 
                     t += 1
                 end
+
+                render_location(renderer, current_state, :p1_pos; 
+                    ax_idx=(1, col), color=:black, alpha=1.0*lik, markersize=8)
+                render_location(renderer, current_state, :p2_pos; 
+                    ax_idx=(1, col), color=:black, alpha=1.0*lik, markersize=8)
+
             end
         end
     end
