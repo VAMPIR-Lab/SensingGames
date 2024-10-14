@@ -49,6 +49,6 @@ include("../examples/meetup.jl")
 # include("../examples/fovtag_planar.jl")
 include("../examples/blurtag.jl")
 include("../examples/fovtag.jl")
-include("../examples/hastag.jl")
+include("../examples/simple_fovtag.jl")
 
 end #module

@@ -7,7 +7,9 @@
 #   States are immutable
 #   you can use `alter` to get a new State from an old one and a list of substitutions.
 
+using Statistics
 using StatsBase
+using LinearAlgebra
 using Base: ImmutableDict
 
 struct State
@@ -256,6 +258,31 @@ function stack(dists::AbstractArray{StateDist})
         dist.w
     end
     StateDist(Z, w, dists[1].ids, dists[1].map)
+end
+
+function approx_kl(dist1::StateDist, dist2::StateDist, id)
+    # KL(dist1 || dist2), approximating both as
+    #   normal distributions
+
+    Σ1 = cov(dist1[id])
+    μ1 = mean(dist1[id], dims=1)
+    Σ2 = cov(dist2[id])
+    μ2 = mean(dist2[id], dims=1)
+    k = size(dist1[id])[2]
+
+    a = 0.5*log(det(Σ2) / det(Σ1)) - k/2
+    b = 0.5*tr(inv(Σ2) * (Σ1 + (μ1-μ2)'*(μ1-μ2)))
+
+    a + b
+end
+
+function approx_surprisal(dist::StateDist, state::State, id)
+    Σ = cov(dist[id])
+    μ = mean(dist[id], dims=1)'
+    x = state[id]
+    k = length(state[id])
+
+    -log((2π^(-k/2) * det(Σ)^(-1/2) * exp(-0.5 * (x-μ)'*inv(Σ)*(x-μ)))[])
 end
 
 

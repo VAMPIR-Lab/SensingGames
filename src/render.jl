@@ -11,6 +11,7 @@ end
 
 function MakieRenderer()
     fig = Figure()
+    colsize!(fig.layout, 1, Aspect(1, 1.0))
     MakieRenderer(
         fig,
         nothing,
@@ -82,9 +83,10 @@ function render_trajectory(r::MakieRenderer, states::AbstractArray{State}, id; a
     a_dx = @lift([$x[end] - $x[end-1]])
     a_dy = @lift([$y[end] - $y[end-1]])
 
-    # arrows!(ax, a_x, a_y, a_dx, a_dy;
-    #     color, alpha, kwargs...
-    # )
+
+    arrows!(ax, a_x, a_y, a_dx, a_dy;
+        color=(:black, alpha), kwargs...
+    )
 end
 
 
@@ -104,12 +106,12 @@ end
 
 
 function render_fov(r::MakieRenderer, state::State, fov, id_pos, id_θ; ax_idx, 
-        color=:black, alpha=0.2, scale=5, kwargs...)
+        color=:black, alpha=0.2, scale=10, kwargs...)
     state = _update_observable(r, state)
     isnothing(state) && return
     ax = _get_axis(r, ax_idx)
 
-    # pos =   @lift($state[id_pos])
+    pos =   @lift($state[id_pos])
     # left =  @lift($state[id_θ][1] - fov)
     # right = @lift($state[id_θ][1] + fov)
     
@@ -117,19 +119,26 @@ function render_fov(r::MakieRenderer, state::State, fov, id_pos, id_θ; ax_idx,
     #     color, alpha, kwargs...)
 
     vertices = @lift(
-        [(
+        [($pos[1], $pos[2]); [(
             $state[id_pos][1] + scale*cos($state[id_θ][1] + k),
             $state[id_pos][2] + scale*sin($state[id_θ][1] + k)
-        ) for k in (-fov/2):(fov/2):0.02]
+        ) for k in (-fov/2):0.1:(fov/2)]]
     )
     poly!(ax, vertices; 
         color, alpha, kwargs...
     )
 end
 
-function render_static_circle(r::MakieRenderer, center, radius; ax_idx, kwargs...)
-    # (center, radius) = _update_observable(r, (center, radius))
-    # isnothing(state) && return
+function render_static_circle(r::MakieRenderer, center, radius; fill_alpha=0.1, ax_idx, kwargs...)
+    state = _update_observable(r, 1)
+    isnothing(state) && return
+
+    vertices = [(
+            center[1] + radius*cos(k),
+            center[2] + radius*sin(k)
+        ) for k in 0:0.1:2π]
+
     ax = _get_axis(r, ax_idx)
-    arc!(ax, center, radius, 0, 2π, color=:black, linestyle=:dot)
+    poly!(ax, vertices; color=:black, alpha=fill_alpha, kwargs...)
+    arc!(ax, Tuple(center), radius, 0, 2π, color=:black)
 end

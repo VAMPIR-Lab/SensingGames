@@ -10,8 +10,8 @@ function solve(callback, game::ContinuousGame, prior_belief, game_params, cost_f
 
     # TODO - Special casing for two player games
     flux_setups = (;
-        p1 = Flux.setup(Adam(5e-4), game_params[:p1]),
-        p2 = Flux.setup(Adam(5e-4), game_params[:p2]),
+        p1 = Flux.setup(Adam(1e-3), game_params[:p1]),
+        p2 = Flux.setup(Adam(1e-3), game_params[:p2]),
     )
     
 
