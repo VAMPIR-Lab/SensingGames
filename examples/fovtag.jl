@@ -18,7 +18,7 @@ using Dates
 
 
 
-function make_fovtag_sensing_step(agent, other; fov, scale=5.0, offset=2)
+function make_fovtag_sensing_step(agent, other; fov, scale=100.0, offset=2)
     id_obs = Symbol("$(agent)_obs")
     id_own_θ = Symbol("$(agent)_θ")
     id_own_pos = Symbol("$(agent)_pos")
@@ -232,16 +232,17 @@ function test_fovtag_active_info_gathering()
 end
 
 function test_fovtag_multi_policy_robustness()
-    n_sim_steps = 100
+    n_sim_steps = 40
 
-    for (p1_solves, p2_solves) in [
-        (1, 1)
-    ]
+    p1_solves = 2
+    p2_solves = 2
 
-        for s in 1:5
+    for (γ1, γ2) in Iterators.product(0.2:0.1:1, [0.1])
+        println((γ1, γ2))
+        for s in 1:20
 
             open("multi_eq.txt", "a") do file
-                write(file, "P1: $p1_solves solves; P2: $p2_solves; trial: $s\n")
+                write(file, "P1: $γ1; P2: $γ2; trial: $s\n")
             end
 
             renderer = MakieRenderer()
@@ -251,8 +252,8 @@ function test_fovtag_multi_policy_robustness()
 
             optimization_options = (;
                 n_lookahead = T,
-                n_iters = 20,
-                batch_size = 5,
+                n_iters = 10,
+                batch_size = 10,
                 max_wall_time = 120000, # Not respected right now
                 steps_per_seed = 1,
                 steps_per_render = 10
@@ -307,8 +308,8 @@ function test_fovtag_multi_policy_robustness()
             prior_fn = make_fovtag_prior(zero_state, n=1000)
             # p2_belief = JointParticleBelief(fovtag_game, prior_fn())
             # p1_belief = JointParticleBelief(fovtag_game, prior_fn())
-            p1_belief = HybridParticleBelief(fovtag_game, prior_fn(), 0.1)
-            p2_belief = HybridParticleBelief(fovtag_game, prior_fn(), 0.1)
+            p1_belief = HybridParticleBelief(fovtag_game, prior_fn(), γ1)
+            p2_belief = HybridParticleBelief(fovtag_game, prior_fn(), γ2)
 
             true_state = StateDist([prior_fn()[rand(1:10)]])
             p1_ids = [:t; :p1_pos; :p1_vel; :p1_θ; :p1_obs; :p1_pos_h; :p1_obs_h]
@@ -337,7 +338,7 @@ function test_fovtag_multi_policy_robustness()
 
             scores = []
             for t in 1:n_sim_steps
-                println(".")
+                print(".")
 
                 p1_params = map(p1_params) do params
                     solve(fovtag_game, p1_belief, params, cost_fns, optimization_options)
@@ -358,19 +359,19 @@ function test_fovtag_multi_policy_robustness()
                 # multi_update!(p2_belief, p2_params)
                 # multi_update!(p1_belief, p1_params)
 
-                render_fovtag(renderer, [
-                    # (draw(p1_belief.dist; n=20, weight=true), p1_params[1]),
-                    (true_state, true_params),
-                    # (draw(p2_belief.dist; n=20, weight=true), p2_params[1])
-                    ], fovtag_game, fov; T)
+                # render_fovtag(renderer, [
+                #     (draw(p1_belief.dist; n=20, weight=true), p1_params[1]),
+                #     (true_state, true_params),
+                #     (draw(p2_belief.dist; n=20, weight=true), p2_params[1])
+                #     ], fovtag_game, fov; T)
                 scores = [scores; dist(true_state[1][:p1_pos], true_state[1][:p2_pos])]
                 # println("$t\t" * string(dist(true_state[1][:p1_pos], true_state[1][:p2_pos])))
                 
 
-                p1_retrokl = string(approx_kl(p2_belief.dist, p1_belief.dist, :p1_pos))
-                p2_retrokl = string(approx_kl(p1_belief.dist, p2_belief.dist, :p2_pos))
-                p1_targkl  = string(approx_kl(p2_belief.dist, p1_belief.dist, :p2_pos))
-                p2_targkl  = string(approx_kl(p1_belief.dist, p2_belief.dist, :p1_pos))
+                # p1_retrokl = string(approx_kl(p2_belief.dist, p1_belief.dist, :p1_pos))
+                # p2_retrokl = string(approx_kl(p1_belief.dist, p2_belief.dist, :p2_pos))
+                # p1_targkl  = string(approx_kl(p2_belief.dist, p1_belief.dist, :p2_pos))
+                # p2_targkl  = string(approx_kl(p1_belief.dist, p2_belief.dist, :p1_pos))
 
                 p1_surp1 = string(approx_surprisal(p1_belief.dist, true_state[1], :p1_pos))
                 p1_surp2 = string(approx_surprisal(p1_belief.dist, true_state[1], :p2_pos))
@@ -378,14 +379,14 @@ function test_fovtag_multi_policy_robustness()
                 p2_surp2 = string(approx_surprisal(p2_belief.dist, true_state[1], :p2_pos))
 
                 open("multi_eq.txt", "a") do file
-                    write(file, "$p1_retrokl \t$p2_retrokl \t$p1_targkl \t$p2_targkl \t$p1_surp1 \t$p1_surp2 \t$p2_surp1 \t$p2_surp2\n")
+                    write(file, "$p1_surp1 \t$p1_surp2 \t$p2_surp1 \t$p2_surp2\n")
                 end
             end
 
-
-            open("multi_eq.txt", "a") do file
-                write(file, "cost: $(string(sum(scores)/n_sim_steps))\n")
-            end
+            println("\ncost: $(string(sum(scores)/n_sim_steps))\n")
+            # open("multi_eq.txt", "a") do file
+            #     write(file, "cost: $(string(sum(scores)/n_sim_steps))\n")
+            # end
         end
     end
 end
