@@ -1,6 +1,6 @@
 name = "SensingGames"
 uuid = "8a846df6-e3c4-4147-80e6-781e263272d9"
-authors = ["mel"]
+authors = [""]
 version = "0.1.0"
 
 [deps]

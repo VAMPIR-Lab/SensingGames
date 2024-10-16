@@ -1,7 +1,3 @@
-# Vanderbilt Mathematical Programming 
-#   and Intelligent Robotics Lab (VaMPIR)
-
-
 module SensingGames
 
 ## Differentiation + function approximation
