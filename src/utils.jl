@@ -16,6 +16,7 @@ function gauss_cdf(mean, var, x)
 end
 
 function sample_gauss(mean, var)
+    rng = SensingGames._game_rng
     inverse_gauss_cdf(mean, var, rand(rng))
 end
 
@@ -32,7 +33,7 @@ function gauss_pdf(x, mean, var)
 end
 
 
-function sample_trimmed_gauss(μ, σ2, quantile, l, u, σ_trim=5)
+function sample_trimmed_gauss(μ, σ2, quantile; l, u, σ_trim=5)
     new_quantile = if σ2 > σ_trim^2
         prc1 = gauss_cdf.(μ, σ2, l)
         prc2 = gauss_cdf.(μ, σ2, u)
@@ -41,13 +42,12 @@ function sample_trimmed_gauss(μ, σ2, quantile, l, u, σ_trim=5)
         quantile
     end
     sample_gauss(μ, σ2, new_quantile)
-    sample_gauss(μ, σ2, quantile)
 end
 
-function sample_trimmed_gauss(μ, σ2, l, u)
-    sample_trimmed_gauss(μ, σ2, rand() |> gpu; l, u)
+function sample_trimmed_gauss(μ, σ2; l, u)
+    sample_trimmed_gauss(μ, σ2, rand(); l, u)
 end
-    
+
 
 
 # Very basic geometry stuff
@@ -130,8 +130,10 @@ end
 
 
 # Cost ornaments: Penalties for bounds and regularizations
-function cost_bound(v, lower, upper)
-    sum(penalty.(upper .- v) + penalty.(lower .+ vi))
+function cost_bound(v, lower, upper; λ=100)
+    λ * sum(enumerate(v)) do (i, vi)
+        penalty(upper[i] - vi) + penalty(-lower[i] + vi)
+    end
 end
 
 function cost_regularize(v; α=0.1)

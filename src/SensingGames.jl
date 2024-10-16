@@ -13,7 +13,7 @@ using ChainRulesCore
 # using ForwardDiff
 using JLD2
 
-using CUDA
+# using CUDA
 
 ## Visualization
 using GLMakie

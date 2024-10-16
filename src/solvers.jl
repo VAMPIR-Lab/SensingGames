@@ -9,7 +9,7 @@ function solve(callback, game::ContinuousGame, prior_belief, game_params, cost_f
         cost_fns[agent](hist)
     end
 
-    flux_setups = (; (k => Flux.setup(Adam(1e-3), game_params[k]) for (k, v) in pairs(cost_fns))...)
+    flux_setups = (; (k => Flux.setup(Adam(5e-4), game_params[k]) for (k, v) in pairs(cost_fns))...)
     
     for t in 1:options.n_iters
 
