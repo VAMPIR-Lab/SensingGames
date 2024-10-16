@@ -17,7 +17,6 @@ using Dates
 #   With a large scale this looks like a uniform distribution on [-40, 40]
 
 
-
 function make_fovtag_sensing_step(agent, other; fov, scale=100.0, offset=2)
     id_obs = Symbol("$(agent)_obs")
     id_own_θ = Symbol("$(agent)_θ")
@@ -114,30 +113,30 @@ function make_fovtag_prior(zero_state; n=16)
     end
 end
 
+function test_fovtag_gamma()
+    n_sim_steps = 500
+    p1_solves = 4
+    p2_solves = 4
 
-function test_fovtag_active_info_gathering()
-
-    for (p1_solver, p2_solver) in [
-        (:active, :active),
-        (:inactive, :active),
-        (:inactive, :inactive)]
-
-        println("=======\nP1 $p1_solver, P2 $p2_solver")
+    for (γ1, γ2) in [[(γ, 0.1) for γ in 0:0.1:1]; [(0.1, γ) for γ in 0:0.1:1]]
         for s in 1:20
             Random.seed!(42+s)
+
+            open("gamma.txt", "a") do file
+                write(file, "$γ1, $γ2, trial: $s\n")
+            end
+
+            renderer = MakieRenderer()
 
             T = 6
             fov = (; p1=1.0, p2=1.0)
 
             optimization_options = (;
                 n_lookahead = T,
-                n_iters = 100,
+                n_iters = 10,
                 batch_size = 10,
-                max_wall_time = 120000, # Not respected right now
-                steps_per_seed = 1,
-                steps_per_render = 10
+                steps_per_seed = 1
             )
-
 
             clock_step = make_clock_step(1.0)
 
@@ -148,15 +147,11 @@ function test_fovtag_active_info_gathering()
             p1_ang_hist_step = make_hist_step(:p1_θ_h, :p1_θ, T)
             p2_ang_hist_step = make_hist_step(:p2_θ_h, :p2_θ, T)
 
-
-            p1_obs_hist_step_planning = (p1_solver == :active) ? p1_obs_hist_step : make_identity_step()
-            p2_obs_hist_step_planning = (p2_solver == :active) ? p2_obs_hist_step : make_identity_step()
-
             p1_obs_hist_step = make_hist_step(:p1_obs_h, :p1_obs, T)
             p2_obs_hist_step = make_hist_step(:p2_obs_h, :p2_obs, T)
 
-            p1_dynamics_step = make_vel_dynamics_step(:p1; control_scale=3)
-            p2_dynamics_step = make_vel_dynamics_step(:p2; control_scale=4)
+            p1_dynamics_step = make_vel_dynamics_step(:p1; control_scale=1.4)
+            p2_dynamics_step = make_vel_dynamics_step(:p2; control_scale=2)
 
             p1_obs_step = make_fovtag_sensing_step(:p1, :p2; fov=fov[:p1])
             p2_obs_step = make_fovtag_sensing_step(:p2, :p1; fov=fov[:p2])
@@ -166,14 +161,14 @@ function test_fovtag_active_info_gathering()
 
             attr_ids = [:pos, :vel, :acc, :θ, :vω, :obs, :pos_h, :obs_h, :θ_h]
             attr_w   = [ 2;    2;    2;    1;  2;   2;    2*T;    2*T;    T]
+
             zero_state = State([
                 :t => 1;
                 Symbol.(:p1, :_, attr_ids) .=> attr_w;
                 Symbol.(:p2, :_, attr_ids) .=> attr_w;
             ]...)
 
-
-            # Actual version of the game. This is what the true state evolves according to.
+            
             fovtag_game = ContinuousGame([
                 clock_step,
                 p1_obs_step,       p2_obs_step,
@@ -184,15 +179,132 @@ function test_fovtag_active_info_gathering()
                 p1_dynamics_step,  p2_dynamics_step,
             ])
 
+            prior_fn = make_fovtag_prior(zero_state, n=1000)
+            p1_belief = HybridParticleBelief(fovtag_game, prior_fn(), γ1)
+            p2_belief = HybridParticleBelief(fovtag_game, prior_fn(), γ2)
 
-            # Version of the game used for planning.
-            #   If we're not using active information gathering, we don't
-            #   get observations as the game is rolled out in planning
-            #   To emulate this we replace the observation history tracking
-            #   step with the identity (technically we would change the actual
-            #   observation step too, but the policy accepts the history,
-            #   so not updating the history suffices to block th observations
-            #   from reaching the policy.)
+            true_state = StateDist([prior_fn()[rand(1:10)]])
+            p1_ids = [:t; :p1_pos; :p1_vel; :p1_θ; :p1_obs; :p1_pos_h; :p1_obs_h]
+            p2_ids = [:t; :p2_pos; :p2_vel; :p2_θ; :p2_obs; :p2_pos_h; :p2_obs_h]
+
+            cost_fns  = make_fovtag_costs()
+
+            p1_params = map(1:p1_solves) do _
+                (;
+                    p1 = make_policy(4*T, 3; t_max=T),
+                    p2 = make_policy(4*T, 3; t_max=T) 
+                )
+            end
+
+            p2_params = map(1:p2_solves) do _
+                (;
+                    p1 = make_policy(4*T, 3; t_max=T),
+                    p2 = make_policy(4*T, 3; t_max=T)
+                )
+            end
+
+            scores = []
+            for t in 1:n_sim_steps
+                print(".")
+
+                p1_params = map(p1_params) do params
+                    solve(fovtag_game, p1_belief, params, cost_fns, optimization_options)
+                end
+
+                p2_params = map(p2_params) do params
+                    solve(fovtag_game, p2_belief, params, cost_fns, optimization_options)
+                end
+
+                true_params = (;
+                    p1 = rand(p1_params).p1,
+                    p2 = rand(p2_params).p2 
+                )
+
+                true_state = step(fovtag_game, true_state, true_params)
+                multi_update!(p2_belief, select(true_state, p2_ids...)[1], p2_params)
+                multi_update!(p1_belief, select(true_state, p1_ids...)[1], p1_params)
+
+                # render_fovtag(renderer, [
+                #     (draw(p1_belief.dist; n=20, weight=true), p1_params[1]),
+                #     (true_state, true_params),
+                #     (draw(p2_belief.dist; n=20, weight=true), p2_params[1])
+                #     ], fovtag_game, fov; T)
+                roll!(scores, dist(true_state[1][:p1_pos], true_state[1][:p2_pos]), 50)
+
+                open("gamma.txt", "a") do file
+                    write(file, "cost: $(string(sum(scores)/length(scores)))\n")
+                end
+            end
+        end
+    end
+end
+
+function test_fovtag_active_info_gathering()
+    n_sim_steps = 20
+    for (p1_solver, p2_solver) in Iterators.product([:active; :inactive], [:active; :inactive])
+        for s in 1:20
+            Random.seed!(42+s)
+
+            open("fovtag.txt", "a") do file
+                write(file, "trial: $s\n")
+            end
+
+            renderer = MakieRenderer()
+
+            T = 6
+            fov = (; p1=1.0, p2=1.0)
+
+            optimization_options = (;
+                n_lookahead = T,
+                n_iters = 10,
+                batch_size = 10,
+                steps_per_seed = 1
+            )
+
+            clock_step = make_clock_step(1.0)
+
+            p1_pos_hist_step = make_hist_step(:p1_pos_h, :p1_pos, T)
+            p2_pos_hist_step = make_hist_step(:p2_pos_h, :p2_pos, T)
+            p1_obs_hist_step = make_hist_step(:p1_obs_h, :p1_obs, T)
+            p2_obs_hist_step = make_hist_step(:p2_obs_h, :p2_obs, T)
+            p1_ang_hist_step = make_hist_step(:p1_θ_h, :p1_θ, T)
+            p2_ang_hist_step = make_hist_step(:p2_θ_h, :p2_θ, T)
+            p1_obs_hist_step_planning = (p1_solver == :active) ? p1_obs_hist_step : make_identity_step()
+            p2_obs_hist_step_planning = (p2_solver == :active) ? p2_obs_hist_step : make_identity_step()
+
+
+            p1_obs_hist_step = make_hist_step(:p1_obs_h, :p1_obs, T)
+            p2_obs_hist_step = make_hist_step(:p2_obs_h, :p2_obs, T)
+
+            p1_dynamics_step = make_vel_dynamics_step(:p1; control_scale=1.4)
+            p2_dynamics_step = make_vel_dynamics_step(:p2; control_scale=2)
+
+            p1_obs_step = make_fovtag_sensing_step(:p1, :p2; fov=fov[:p1])
+            p2_obs_step = make_fovtag_sensing_step(:p2, :p1; fov=fov[:p2])
+
+            p1_control_step = make_nn_control(:p1, [:p1_pos_h, :p1_obs_h], :p1_vel, t_max=T)
+            p2_control_step = make_nn_control(:p2, [:p2_pos_h, :p2_obs_h], :p2_vel, t_max=T)
+
+            attr_ids = [:pos, :vel, :acc, :θ, :vω, :obs, :pos_h, :obs_h, :θ_h]
+            attr_w   = [ 2;    2;    2;    1;  2;   2;    2*T;    2*T;    T]
+
+            zero_state = State([
+                :t => 1;
+                Symbol.(:p1, :_, attr_ids) .=> attr_w;
+                Symbol.(:p2, :_, attr_ids) .=> attr_w;
+            ]...)
+
+            
+            fovtag_game = ContinuousGame([
+                clock_step,
+                p1_obs_step,       p2_obs_step,
+                p1_pos_hist_step,  p2_pos_hist_step,
+                p1_obs_hist_step,  p2_obs_hist_step,
+                p1_ang_hist_step,  p2_ang_hist_step,
+                p1_control_step,   p2_control_step,
+                p1_dynamics_step,  p2_dynamics_step,
+            ])
+
             planning_fovtag_game = ContinuousGame([
                 clock_step,
                 p1_obs_step,       p2_obs_step,
@@ -203,46 +315,72 @@ function test_fovtag_active_info_gathering()
                 p1_dynamics_step,  p2_dynamics_step,
             ])
 
-
             prior_fn = make_fovtag_prior(zero_state, n=1000)
-            joint_belief = JointParticleBelief(fovtag_game, prior_fn())
+            p1_belief = HybridParticleBelief(fovtag_game, prior_fn(), 0.1)
+            p2_belief = HybridParticleBelief(fovtag_game, prior_fn(), 0.1)
+
             true_state = StateDist([prior_fn()[rand(1:10)]])
+            p1_ids = [:t; :p1_pos; :p1_vel; :p1_θ; :p1_obs; :p1_pos_h; :p1_obs_h]
+            p2_ids = [:t; :p2_pos; :p2_vel; :p2_θ; :p2_obs; :p2_pos_h; :p2_obs_h]
+
             cost_fns  = make_fovtag_costs()
 
+            p1_params = (;
+                    p1 = make_policy(4*T, 3; t_max=T),
+                    p2 = make_policy(4*T, 3; t_max=T) 
+                )
+
+            p2_params = (;
+                    p1 = make_policy(4*T, 3; t_max=T),
+                    p2 = make_policy(4*T, 3; t_max=T)
+                )
 
             true_params = (;
-                p1 = make_policy(4*T, 3; t_max=T), # π_1^(1)
-                p2 = make_policy(4*T, 3; t_max=T)  # π_2^(1)
+                    p1 = p1_params[:p1],
+                    p2 = p2_params[:p2] 
             )
 
             scores = []
+            for t in 1:n_sim_steps
+                print(".")
 
-            n_steps = 20
-            for t in 1:n_steps
-                true_params = solve(planning_fovtag_game, joint_belief, 
-                        true_params, cost_fns, optimization_options)
+                p1_params = solve(planning_fovtag_game, p1_belief, true_params, cost_fns, optimization_options)
+                p2_params = solve(planning_fovtag_game, p2_belief, true_params, cost_fns, optimization_options)
+
+                true_params = (;
+                        p1 = p1_params[:p1],
+                        p2 = p2_params[:p2] 
+                )
 
                 true_state = step(fovtag_game, true_state, true_params)
-                update!(joint_belief, true_params)
-                scores = [scores; dist(true_state[1][:p1_pos], true_state[1][:p2_pos])]
+                update!(p1_belief, select(true_state, p1_ids...)[1], p1_params)
+                update!(p2_belief, select(true_state, p2_ids...)[1], p2_params)
+
+                # render_fovtag(renderer, [
+                #     (draw(p1_belief.dist; n=20, weight=true), p1_params[1]),
+                #     (true_state, true_params),
+                #     (draw(p2_belief.dist; n=20, weight=true), p2_params[1])
+                #     ], fovtag_game, fov; T)
+                roll!(scores, dist(true_state[1][:p1_pos], true_state[1][:p2_pos]), 50)
+
+                open("fovtag_$(p1_solver)_$(p2_solver).txt", "a") do file
+                    write(file, "cost: $(string(sum(scores)/length(scores)))\n")
+                end
             end
-            println(sum(scores)/n_steps)
         end
     end
 end
 
-function test_fovtag_multi_policy_robustness()
-    n_sim_steps = 40
+function test_fovtag_equilibrium_selection()
+    n_sim_steps = 100
 
-    p1_solves = 2
-    p2_solves = 2
+    for (p1_solves, p2_solves) in Iterators.product(1:4, 1:4)
 
-    for (γ1, γ2) in Iterators.product(0.2:0.1:1, [0.1])
-        println((γ1, γ2))
-        for s in 1:20
+        for s in 1:5
+            Random.seed!(42+s)
 
             open("multi_eq.txt", "a") do file
-                write(file, "P1: $γ1; P2: $γ2; trial: $s\n")
+                write(file, "P1: $p1_solves solves; P2: $p2_solves; trial: $s\n")
             end
 
             renderer = MakieRenderer()
@@ -259,7 +397,6 @@ function test_fovtag_multi_policy_robustness()
                 steps_per_render = 10
             )
 
-            Random.seed!(42+s)
 
             clock_step = make_clock_step(1.0)
 
@@ -306,10 +443,8 @@ function test_fovtag_multi_policy_robustness()
 
 
             prior_fn = make_fovtag_prior(zero_state, n=1000)
-            # p2_belief = JointParticleBelief(fovtag_game, prior_fn())
-            # p1_belief = JointParticleBelief(fovtag_game, prior_fn())
-            p1_belief = HybridParticleBelief(fovtag_game, prior_fn(), γ1)
-            p2_belief = HybridParticleBelief(fovtag_game, prior_fn(), γ2)
+            p1_belief = HybridParticleBelief(fovtag_game, prior_fn(), 0.1)
+            p2_belief = HybridParticleBelief(fovtag_game, prior_fn(), 0.1)
 
             true_state = StateDist([prior_fn()[rand(1:10)]])
             p1_ids = [:t; :p1_pos; :p1_vel; :p1_θ; :p1_obs; :p1_pos_h; :p1_obs_h]
@@ -338,7 +473,7 @@ function test_fovtag_multi_policy_robustness()
 
             scores = []
             for t in 1:n_sim_steps
-                print(".")
+                println(".")
 
                 p1_params = map(p1_params) do params
                     solve(fovtag_game, p1_belief, params, cost_fns, optimization_options)
@@ -356,8 +491,6 @@ function test_fovtag_multi_policy_robustness()
                 true_state = step(fovtag_game, true_state, true_params)
                 multi_update!(p2_belief, select(true_state, p2_ids...)[1], p2_params)
                 multi_update!(p1_belief, select(true_state, p1_ids...)[1], p1_params)
-                # multi_update!(p2_belief, p2_params)
-                # multi_update!(p1_belief, p1_params)
 
                 # render_fovtag(renderer, [
                 #     (draw(p1_belief.dist; n=20, weight=true), p1_params[1]),
@@ -368,10 +501,10 @@ function test_fovtag_multi_policy_robustness()
                 # println("$t\t" * string(dist(true_state[1][:p1_pos], true_state[1][:p2_pos])))
                 
 
-                # p1_retrokl = string(approx_kl(p2_belief.dist, p1_belief.dist, :p1_pos))
-                # p2_retrokl = string(approx_kl(p1_belief.dist, p2_belief.dist, :p2_pos))
-                # p1_targkl  = string(approx_kl(p2_belief.dist, p1_belief.dist, :p2_pos))
-                # p2_targkl  = string(approx_kl(p1_belief.dist, p2_belief.dist, :p1_pos))
+                p1_retrokl = string(approx_kl(p2_belief.dist, p1_belief.dist, :p1_pos))
+                p2_retrokl = string(approx_kl(p1_belief.dist, p2_belief.dist, :p2_pos))
+                p1_targkl  = string(approx_kl(p2_belief.dist, p1_belief.dist, :p2_pos))
+                p2_targkl  = string(approx_kl(p1_belief.dist, p2_belief.dist, :p1_pos))
 
                 p1_surp1 = string(approx_surprisal(p1_belief.dist, true_state[1], :p1_pos))
                 p1_surp2 = string(approx_surprisal(p1_belief.dist, true_state[1], :p2_pos))
@@ -379,78 +512,13 @@ function test_fovtag_multi_policy_robustness()
                 p2_surp2 = string(approx_surprisal(p2_belief.dist, true_state[1], :p2_pos))
 
                 open("multi_eq.txt", "a") do file
-                    write(file, "$p1_surp1 \t$p1_surp2 \t$p2_surp1 \t$p2_surp2\n")
+                    write(file, "$p1_retrokl \t$p2_retrokl \t$p1_targkl \t$p2_targkl \t$p1_surp1 \t$p1_surp2 \t$p2_surp1 \t$p2_surp2\n")
                 end
             end
 
-            println("\ncost: $(string(sum(scores)/n_sim_steps))\n")
-            # open("multi_eq.txt", "a") do file
-            #     write(file, "cost: $(string(sum(scores)/n_sim_steps))\n")
-            # end
-        end
-    end
-end
 
-
-function render_fovtag(renderer, dists, game, fov; T)
-
-    unspool_scheme = [
-        :p1_pos_h => :p1_pos,
-        :p2_pos_h => :p2_pos,
-        :p1_obs_h => :p1_obs,
-        :p2_obs_h => :p2_obs,
-        :p1_θ_h   => :p1_θ,
-        :p2_θ_h   => :p2_θ
-    ]
-
-
-    render(renderer) do
-        for (col, (dist, params)) in enumerate(dists)
-
-            plan = step(game, dist, params; n=T)[end]
-
-            render_static_circle(renderer, [0 0], 45; ax_idx=(1, col))
-
-            for i in 1:length(dist)
-                current_state = dist[i]
-                lik = exp(dist.w[i])
-
-
-                past = unspool(current_state, unspool_scheme...)
-                future_particle = plan[i]
-                future = unspool(future_particle, unspool_scheme...)
-                history = [past; future]
-                # history = [past; future[1]]
-
-                render_trajectory(renderer, history, :p1_pos; 
-                    ax_idx=(1, col), color=:blue, alpha=lik, linewidth=4)
-                render_trajectory(renderer, history, :p2_pos; 
-                    ax_idx=(1, col), color=:red, alpha=lik, linewidth=4)
-                
-                for (i, state) in enumerate(history)
-                    t = i-T
-
-                    # Only plot observations if there are few enough of them
-                    #   that it doesn't get crazy
-                    if length(dist) < 5
-                        render_location(renderer, state, :p1_obs; 
-                            ax_idx=(1, col), color=:blue, alpha=1.0 * ((t > 0) ? 0 : 1), marker='x', markersize=16)
-                        render_location(renderer, state, :p2_obs; 
-                            ax_idx=(1, col), color=:red, alpha=1.0 * ((t > 0) ? 0 : 1), marker='x', markersize=16)
-                    end
-                    render_fov(renderer, state, fov[:p1], :p1_pos, :p1_θ; 
-                        ax_idx=(1, col), color=:blue, alpha=0.1*lik)
-                    render_fov(renderer, state, fov[:p2], :p2_pos, :p2_θ; 
-                        ax_idx=(1, col), color=:red, alpha=0.1*lik)
-
-                    t += 1
-                end
-
-                render_location(renderer, current_state, :p1_pos; 
-                    ax_idx=(1, col), color=:black, alpha=1.0*lik, markersize=8)
-                render_location(renderer, current_state, :p2_pos; 
-                    ax_idx=(1, col), color=:black, alpha=1.0*lik, markersize=8)
-
+            open("multi_eq.txt", "a") do file
+                write(file, "cost: $(string(sum(scores)/n_sim_steps))\n")
             end
         end
     end
