@@ -23,7 +23,6 @@ function make_clock_step(dt)
     GameComponent(clock, [:t])
 end
 
-
 # Convenience: Component that does nothing
 function make_identity_step()
     GameComponent(

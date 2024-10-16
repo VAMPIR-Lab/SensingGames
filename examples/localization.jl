@@ -4,6 +4,8 @@
 #   In a method that is properly using observations we expect
 #   the agent to move towards y=0, then move towards the target.
 
+# Not currently functional.
+
 using Random
 
 function make_localization_sensing(ego, targ, n; dt=1.0)

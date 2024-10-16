@@ -16,7 +16,6 @@ using Dates
 #   in radians outside the field of view
 #   With a large scale this looks like a uniform distribution on [-40, 40]
 
-
 function make_fovtag_sensing_step(agent, other; fov, scale=100.0, offset=2)
     id_obs = Symbol("$(agent)_obs")
     id_own_θ = Symbol("$(agent)_θ")
@@ -31,19 +30,33 @@ function make_fovtag_sensing_step(agent, other; fov, scale=100.0, offset=2)
     function get_gaussian_params(state_dist)
         our_pos = state_dist[id_own_pos]
         their_pos = state_dist[id_other_pos]
-
         θ1 = state_dist[id_own_θ] .+ π
         θ2 = atan.(our_pos[:, 2] .- their_pos[:, 2], our_pos[:, 1] .- their_pos[:, 1])
         dθ = angdiff.(θ1, θ2)
-        σ = get_sensing_noise.(dθ)
+        σ = Float32.(get_sensing_noise.(dθ))
         μ = state_dist[id_other_pos]
 
         return μ, σ.^2
     end
 
+    # function trim_quantile(q, μ, σ2, l, u)
+    #     new_quantile = if σ2 > 5^2
+    #         prc1 = gauss_cdf.(μ, σ2, l)
+    #         prc2 = gauss_cdf.(μ, σ2, u)
+    #         prc1 .+ quantile.*(prc2 .- prc1)
+    #     else
+    #         quantile
+    #     end
+    # end
+
     function rollout_observation(state_dist::StateDist, game_params)
         μ, σ2 = get_gaussian_params(state_dist)   
-        obs = sample_trimmed_gauss.(μ, σ2; l=-40, u=40)
+        quantile = rand(length(state_dist), 2) |> gpu
+        # obs = sample_trimmed_gauss.(μ, σ2, -40, 40, quantile)
+
+        # quantile = trim_quantile.(quantile, μ, σ2, -40, 40)
+
+        obs = log.(1 ./ quantile .- 1) .* sqrt.(σ2) ./ -1.702 .+ μ
 
         alter(state_dist, 
             id_obs => obs
@@ -62,7 +75,8 @@ function make_fovtag_sensing_step(agent, other; fov, scale=100.0, offset=2)
         x = reshape(x, (1, length(compare_dist), 2))
 
         # Note that we use the true Gaussian PDF (not the trimmed one)
-        p = prod(SensingGames.gauss_pdf.(x, μ, σ2), dims=3)
+        q = exp.(-0.5 *(x .- μ).^2 ./ σ2) ./ sqrt.(2π .* σ2)
+        p = prod(q, dims=3)
         log.(p .+ 1e-10)
     end
 
@@ -97,6 +111,7 @@ function make_fovtag_costs()
 
     (; p1=cost1, p2=cost2)
 end
+
 
 function make_fovtag_prior(zero_state; n=16)
     function prior() 
@@ -245,7 +260,7 @@ function test_fovtag_active_info_gathering()
         for s in 1:20
             Random.seed!(42+s)
 
-            open("fovtag.txt", "a") do file
+            open("fovtag_$(p1_solver)_$(p2_solver).txt", "a") do file
                 write(file, "trial: $s\n")
             end
 

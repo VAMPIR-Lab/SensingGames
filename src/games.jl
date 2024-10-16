@@ -30,6 +30,7 @@ function step(g::ContinuousGame, initial_state, game_params; n=1)
 
     for t in 1:n
         for component in g.components
+            # Zygote.ignore(() -> println(String(Symbol(component))))
             state = component.rollout_fn(state, game_params)
             if NaN ∈ state.z
                 throw(ArgumentError("Transitioned to a NaN state"))

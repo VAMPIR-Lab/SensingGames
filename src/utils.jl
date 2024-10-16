@@ -57,6 +57,31 @@ end
 
 dist(a, b) = sqrt(dist2(a, b))
 
+# Function to find the closest point to the first point
+function min_dist(points)
+    # First point
+    p1 = points[1]
+    
+    # Initialize the minimum distance with a large number
+    minimum_dist = Inf
+    closest_point = nothing
+    
+    # Loop through the rest of the points (n-1 points)
+    for i in 2:length(points)
+        # Compute the distance between p1 and each remaining point
+        dist = sqrt(dist2(p1, points[i]))
+        
+        # Update the minimum distance if a closer point is found
+        if dist < minimum_dist
+            minimum_dist = dist
+            closest_point = points[i]
+        end
+    end
+    
+    # Return the minimum distance
+    return minimum_dist
+end
+
 angdiff(a, b) = posmod((a - b + π), 2π) - π
 posmod(a, n) = (a - floor.(a/n) * n)
 

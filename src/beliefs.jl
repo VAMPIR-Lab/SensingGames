@@ -1,3 +1,24 @@
+# These [X]ParticleBeliefs are different ways of updating
+#   our particles based (or not) on a player's real world observations.
+# On one end is `JointParticleBelief`, where we don't use the real observations
+#   at all. We just evolve all the particles according to the optimal policies.
+#   This works really well in the "shared brain" model, where we solve the Nash
+#   equilibrium problem once for all players, because it means that players by definition
+#   agree where the equilibrium is and never disagree on the optimal policies.
+# On the other end is `ConditionalParticleBelief`, which weights all
+#   our particles by our real observations. This gives a very tight
+#   distribution of particles, but we can't really use this in "shared brain" because we
+#   can't use everyone's real observations. In "split brain" (maybe "separate brains" is a better term),
+#   where everyone solves their own version of the Nash equilibrium problem, we CAN use our real observations,
+#   but it can lead to our belief disagreeing with others', and we might disagree on where the equilibria are, which
+#   is suboptimal for everyone. 
+# HybridParticleBelief essentially forms a spectrum between these
+#   two, where γ=1.0 is "all particles are conditioned on real observations" and γ=0.0 is "no particles
+#   are conditioned."
+# LateParticleBelief conditions all the particles, but only several timesteps after the real observations
+#   have been received. This actually doesn't work very well as far as I can tell, but I'd like to give it
+#   another try very well.
+
 mutable struct LateParticleBelief
     game::ContinuousGame
     prior_fn
