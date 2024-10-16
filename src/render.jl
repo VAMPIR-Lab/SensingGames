@@ -11,6 +11,7 @@ end
 
 function MakieRenderer()
     fig = Figure()
+    colsize!(fig.layout, 1, Aspect(1, 1.0))
     MakieRenderer(
         fig,
         nothing,

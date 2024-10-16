@@ -51,8 +51,6 @@ function step(g::ContinuousGame, initial_dist::StateDist, ground_state::State, g
     ground_dist = StateDist(ground_state, length(state_dist))
     ground_dist_single = StateDist([ground_state])
 
-
-
     for component in g.components
         ids = component.output_ids
         matches = [id ∈ ground_state.ids for id in ids]
